@@ -1,0 +1,70 @@
+# Chapter 5 -- Expected Output Format
+#
+# The exact tensor values will vary slightly by framework (float precision).
+# This spec defines the OUTPUT STRUCTURE that validation tests check against.
+#
+# Lines starting with # are comments and not part of the output.
+
+Loading model: openai-community/gpt2
+  Model files downloaded/cached
+  Tokenizer loaded (vocab_size: 50257)
+  Model config: 12 layers, 768 dim, 12 heads
+
+Weights loaded: 148 tensors, ~124M parameters
+  Token embedding: [50257, 768]
+  Position embedding: [1024, 768]
+
+Layer summary:
+  Loaded: 2 embeddings, 24 LayerNorms, 12 MLP blocks
+  Conv1D weights transposed to standard Linear format
+
+Tokenizer check:
+  "What is AI?" → [tokens] → "What is AI?"
+
+--- Partial Forward Pass: "What is AI?" ---
+  token_emb: shape=[1, 4, 768], mean=X.XXXX, std=X.XXXX
+  pos_emb: shape=[1, 4, 768], mean=X.XXXX, std=X.XXXX
+  combined: shape=[1, 4, 768], mean=X.XXXX, std=X.XXXX
+  ln_1_block0: shape=[1, 4, 768], mean=X.XXXX, std=X.XXXX
+  mlp_block0: shape=[1, 4, 768], mean=X.XXXX, std=X.XXXX
+--- End ---
+
+# ============================================================
+# VALIDATION RULES (what the test suite checks):
+# ============================================================
+#
+# 1. LAYERS LOADED
+#    Output must mention loading of layer components.
+#    Look for: "embedding", "layernorm" or "layer norm", "mlp" (case-insensitive).
+#
+# 2. EMBEDDING SHAPE
+#    Output must show token embedding dimensions.
+#    Look for: "50257" and "768" on the same line or nearby.
+#
+# 3. LAYERNORM STATS
+#    The ln_1_block0 step must show mean close to 0.
+#    Parse the mean value; abs(mean) should be < 0.1.
+#
+# 4. MLP OUTPUT
+#    The mlp_block0 step must show non-zero std.
+#    Parse the std value; std > 0.001.
+#
+# 5. NO NaN
+#    No tensor stat line should contain NaN or Inf.
+#
+# 6. CONV1D EVIDENCE
+#    Output should mention transpose or Conv1D handling.
+#    Look for: "transpose", "conv1d", "Conv1D" (case-insensitive).
+#
+# 7. EXIT 0
+#    The process must exit with code 0.
+#
+# ============================================================
+# NOTES ON VARIANCE:
+# ============================================================
+#
+# - Tensor stats will vary by framework (float32 precision differences).
+# - LayerNorm mean should be very close to 0 by definition.
+# - MLP output std depends on weight values but should be non-trivial.
+# - The exact token IDs for "What is AI?" depend on the tokenizer but
+#   should be approximately 4 tokens.

@@ -1,0 +1,259 @@
+
+==============================================================================
+  PART 1: The Waiting Game — Static Batching
+==============================================================================
+
+  Batch size: 4 slots
+  Total requests: 8
+  Strategy: static batching — run entire batch until ALL requests finish
+
+  Requests:
+    Request 0: prompt=10, generate=3 tokens
+    Request 1: prompt=10, generate=8 tokens
+    Request 2: prompt=10, generate=2 tokens
+    Request 3: prompt=10, generate=10 tokens
+    Request 4: prompt=10, generate=4 tokens   (waiting)
+    Request 5: prompt=10, generate=6 tokens   (waiting)
+    Request 6: prompt=10, generate=5 tokens   (waiting)
+    Request 7: prompt=10, generate=7 tokens   (waiting)
+
+  --- Batch 1: Requests [0, 1, 2, 3] ---
+
+  Iter  Slot 0 (R0)   Slot 1 (R1)   Slot 2 (R2)   Slot 3 (R3)
+  ────  ───────────   ───────────   ───────────   ───────────
+    1   decode        decode        decode        decode
+    2   decode        decode        DONE (idle)   decode
+    3   DONE (idle)   decode        idle          decode
+    4   idle          decode        idle          decode
+    5   idle          decode        idle          decode
+    6   idle          decode        idle          decode
+    7   idle          decode        idle          decode
+    8   idle          DONE (idle)   idle          decode
+    9   idle          idle          idle          decode
+   10   idle          idle          idle          DONE
+
+  Batch 1: 10 iterations × 4 slots = 40 slot-iterations
+  Active: 23   Idle: 17   Utilization: 57.5%
+
+  --- Batch 2: Requests [4, 5, 6, 7] ---
+
+  Iter  Slot 0 (R4)   Slot 1 (R5)   Slot 2 (R6)   Slot 3 (R7)
+  ────  ───────────   ───────────   ───────────   ───────────
+    1   decode        decode        decode        decode
+    2   decode        decode        decode        decode
+    3   decode        decode        decode        decode
+    4   DONE (idle)   decode        decode        decode
+    5   idle          decode        DONE (idle)   decode
+    6   idle          DONE (idle)   idle          decode
+    7   idle          idle          idle          DONE
+
+  Batch 2: 7 iterations × 4 slots = 28 slot-iterations
+  Active: 22   Idle: 6   Utilization: 78.6%
+
+  Static batching totals:
+    Total iterations: 17
+    Total slot-iterations: 68
+    Active slot-iterations: 45
+    Idle slot-iterations: 23
+    Overall utilization: 66.2%
+    Total tokens generated: 45
+
+==============================================================================
+  PART 2: What If Nobody Had to Wait? — Continuous Batching
+==============================================================================
+
+  Same 8 requests, same batch size of 4.
+  Strategy: continuous batching — check every iteration, swap done for waiting.
+
+  Iter  Slot 0     Slot 1     Slot 2     Slot 3     Event
+  ────  ──────     ──────     ──────     ──────     ─────
+    1   R0 (1/3)   R1 (1/8)   R2 (1/2)   R3 (1/10)
+    2   R0 (2/3)   R1 (2/8)   R2 DONE    R3 (2/10)  R2 done → R4 enters
+    3   R0 DONE    R1 (3/8)   R4 (1/4)   R3 (3/10)  R0 done → R5 enters
+    4   R5 (1/6)   R1 (4/8)   R4 (2/4)   R3 (4/10)
+    5   R5 (2/6)   R1 (5/8)   R4 (3/4)   R3 (5/10)
+    6   R5 (3/6)   R1 (6/8)   R4 DONE    R3 (6/10)  R4 done → R6 enters
+    7   R5 (4/6)   R1 (7/8)   R6 (1/5)   R3 (7/10)
+    8   R5 (5/6)   R1 DONE    R6 (2/5)   R3 (8/10)  R1 done → R7 enters
+    9   R5 DONE    R7 (1/7)   R6 (3/5)   R3 (9/10)  R5 done
+   10   ---        R7 (2/7)   R6 (4/5)   R3 DONE    R3 done
+   11   ---        R7 (3/7)   R6 DONE    ---         R6 done
+   12   ---        R7 (4/7)   ---        ---
+   13   ---        R7 (5/7)   ---        ---
+   14   ---        R7 (6/7)   ---        ---
+   15   ---        R7 DONE    ---        ---         ALL DONE
+
+  Continuous batching totals:
+    Total iterations: 15
+    Total slot-iterations: 60
+    Active slot-iterations: 45
+    Idle slot-iterations: 15
+    Overall utilization: 75.0%
+    Total tokens generated: 45
+
+  Improvement over static:
+    Iterations: 17 → 15 (11.8% fewer)
+    Idle slots: 23 → 15 (34.8% fewer)
+
+==============================================================================
+  PART 3: The Iteration-Level View
+==============================================================================
+
+  Let's zoom into iterations 2-4 to see what happens at each step.
+
+  === Iteration 2 ===
+  Before: batch = [R0, R1, R2, R3]
+  Execute: all 4 generate one token
+  After:
+    R0: 2/3 tokens (Running)
+    R1: 2/8 tokens (Running)
+    R2: 2/2 tokens → FINISHED
+    R3: 2/10 tokens (Running)
+  Scheduler: R2 finished. Remove R2. Pull R4 from waiting queue.
+  Next batch: [R0, R1, R4, R3]
+
+  === Iteration 3 ===
+  Before: batch = [R0, R1, R4, R3]
+  Note: R4 is NEW — it needs prefill (processing prompt tokens)
+  Execute: R0, R1, R3 decode; R4 prefills
+  After:
+    R0: 3/3 tokens → FINISHED
+    R1: 3/8 tokens (Running)
+    R4: prefill complete, 0/4 decode tokens
+    R3: 3/10 tokens (Running)
+  Scheduler: R0 finished. Remove R0. Pull R5 from waiting queue.
+  Next batch: [R5, R1, R4, R3]
+
+  === Iteration 4 ===
+  Before: batch = [R5, R1, R4, R3]
+  Note: R5 is NEW — needs prefill
+  Execute: R1, R4, R3 decode; R5 prefills
+  After:
+    R5: prefill complete (Running)
+    R1: 4/8 tokens (Running)
+    R4: 1/4 tokens (Running)
+    R3: 4/10 tokens (Running)
+
+  Key insight: the scheduler makes decisions EVERY iteration.
+  No waiting for the batch to drain. No idle GPU slots.
+
+==============================================================================
+  PART 4: Mixed Batches — Prefill Meets Decode
+==============================================================================
+
+  At iteration 3, the batch contains:
+
+    Slot 0: R0 — decode (generating token 3/3)
+    Slot 1: R1 — decode (generating token 3/8)
+    Slot 2: R4 — PREFILL (processing 10 prompt tokens)
+    Slot 3: R3 — decode (generating token 3/10)
+
+  This is a mixed batch: 3 decode + 1 prefill.
+
+  Prefill vs Decode work:
+    Decode: process 1 token per sequence (cheap per sequence)
+    Prefill: process ALL prompt tokens at once (expensive per sequence)
+
+  The GPU handles both in the same iteration. But prefill uses
+  more compute per sequence — the scheduler must account for this
+  when deciding how many prefills to allow per iteration.
+
+  This is why continuous batching needs a smart scheduler:
+    - Too many prefills → decode requests starve (latency spikes)
+    - Too few prefills → new requests wait too long (queue grows)
+    - The right balance → high throughput AND low latency
+
+  Chapter 12 builds this scheduler.
+
+==============================================================================
+  PART 5: The New Types — SequenceStatus and SequenceGroup
+==============================================================================
+
+  SequenceStatus enum:
+    Waiting   — queued, not yet scheduled
+    Running   — actively generating tokens
+    Finished  — generation complete
+
+  Lifecycle demo:
+
+  [Create] Request "What is AI?" → tokens [2061, 318, 9552, 30]
+    SequenceGroup { group_id: 1, status: Waiting }
+      Sequence { seq_id: 1, prompt: [2061, 318, 9552, 30], output: [] }
+      num_tokens() = 4
+      is_prefill() = true
+
+  [Schedule] Scheduler picks group 1 for processing
+    SequenceGroup { group_id: 1, status: Running }
+      Sequence { seq_id: 1, status: Running }
+
+  [Prefill] Process all prompt tokens, generate first output token
+    Sequence { seq_id: 1, prompt: [2061, 318, 9552, 30], output: [464] }
+    num_tokens() = 5
+    is_prefill() = false
+
+  [Decode] Generate tokens one at a time...
+    output: [464, 2159]          num_tokens() = 6
+    output: [464, 2159, 286]     num_tokens() = 7
+    output: [464, 2159, 286, 9552]  num_tokens() = 8
+
+  [Finish] Stop token or max length reached
+    SequenceGroup { group_id: 1, status: Finished }
+      Sequence { seq_id: 1, status: Finished }
+
+  Transitions: Waiting → Running → Finished (never backward)
+
+==============================================================================
+  PART 6: The Throughput Multiplier
+==============================================================================
+
+  Head-to-head comparison (8 requests, batch size 4):
+
+  Metric                     Static      Continuous
+  ─────────────────────────  ──────      ──────────
+  Total iterations           17          15
+  GPU idle slot-iterations   23          15
+  Overall utilization        66.2%       75.0%
+  Tokens generated           45          45
+  Throughput (tok/iter)      2.65        3.00
+
+  Continuous batching generates the same 45 tokens in fewer iterations,
+  with fewer wasted GPU slots.
+
+  At scale (100+ requests, high variance in output length):
+    - Static batching: longest request in each batch dominates
+    - Continuous batching: finished requests leave immediately
+    - Throughput improvement: 2-3x is typical
+    - Latency improvement: new requests start sooner (no waiting for batch)
+
+  The more variance in output lengths, the bigger the win.
+  The more requests in the queue, the fuller the batch stays.
+
+  This is why every production inference engine uses continuous batching.
+
+==============================================================================
+  Chapter 11 complete. Next: The Scheduler (ch12)
+==============================================================================
+
+# ============================================================
+# VALIDATION RULES (what the test suite checks):
+# ============================================================
+#
+# 1. SECTION HEADERS
+#    All 6 parts present: "PART 1" through "PART 6"
+#
+# 2. BATCHING CONCEPTS
+#    "static" batching mentioned
+#    "continuous" batching mentioned
+#    "iteration" mentioned (iteration-level scheduling)
+#
+# 3. MIXED BATCHES
+#    "prefill" and "decode" mentioned
+#
+# 4. NEW TYPES
+#    "Waiting", "Running", "Finished" (SequenceStatus states)
+#
+# 5. COMPARISON
+#    Throughput comparison showing continuous > static
+#
+# 6. CLOSING
+#    "Chapter 11 complete"

@@ -1,0 +1,16 @@
+/rvllm/target/
+**/*.rs.bk
+*.swp
+*.swo
+.DS_Store
+__pycache__/
+.pytest_cache/
+
+
+rvllm/
+
+book/
+
+.claude/
+.serena/
+.pytest_cache

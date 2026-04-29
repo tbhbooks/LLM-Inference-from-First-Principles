@@ -1,0 +1,251 @@
+
+================================================================================
+  Chapter 2: vLLM Architecture Overview
+================================================================================
+
+  vLLM serves LLM inference through a layered architecture — six layers deep
+  in the real implementation. rvllm distills this into seven flat modules that
+  are easier to learn, build, and reason about.
+
+  Let's see both side by side, then trace a request from arrival to response.
+
+
+────────────────────────────────────────────────────────────────────────────────
+  1. vLLM's Six-Layer Architecture
+────────────────────────────────────────────────────────────────────────────────
+
+  In production vLLM, a request passes through six layers. Each layer adds
+  a capability — async handling, IPC, scheduling, multi-GPU, execution:
+
+  ┌─────────────────────────────────────────────────────────────────────┐
+  │                    FastAPI HTTP Server                              │
+  │  Accepts OpenAI-compatible requests, validates parameters           │
+  └──────────────────────────────┬──────────────────────────────────────┘
+                                 │
+                                 ▼
+  ┌─────────────────────────────────────────────────────────────────────┐
+  │                    AsyncLLM                                        │
+  │  Front-end async wrapper. Bridges HTTP async world to engine.       │
+  │  Manages request queues, returns results via asyncio futures.       │
+  └──────────────────────────────┬──────────────────────────────────────┘
+                                 │
+                                 ▼
+  ┌─────────────────────────────────────────────────────────────────────┐
+  │                    EngineCoreClient                                │
+  │  IPC bridge using ZMQ sockets. Sends requests to a separate        │
+  │  engine process and receives outputs. Decouples API from engine.    │
+  └──────────────────────────────┬──────────────────────────────────────┘
+                                 │  (ZMQ IPC)
+                                 ▼
+  ┌─────────────────────────────────────────────────────────────────────┐
+  │                    EngineCore                                      │
+  │  The brain. Runs the scheduling loop:                               │
+  │    1. Pick which sequences to run (Scheduler)                       │
+  │    2. Manage KV cache blocks (BlockManager)                         │
+  │    3. Dispatch work to executor                                     │
+  └──────────────────────────────┬──────────────────────────────────────┘
+                                 │
+                                 ▼
+  ┌─────────────────────────────────────────────────────────────────────┐
+  │                    MultiprocExecutor                                │
+  │  Multi-GPU process manager. Spawns one worker per GPU.              │
+  │  Coordinates tensor-parallel execution across devices.              │
+  └──────────────────────────────┬──────────────────────────────────────┘
+                                 │
+                                 ▼
+  ┌─────────────────────────────────────────────────────────────────────┐
+  │              GPUWorker + GPUModelRunner                             │
+  │  The actual computation. Loads model weights, runs attention,       │
+  │  executes CUDA kernels, manages GPU memory. This is where tokens    │
+  │  are born.                                                          │
+  └─────────────────────────────────────────────────────────────────────┘
+
+  That's a lot of layers! The ZMQ IPC and multi-GPU process management
+  exist for production scalability, but they obscure the core logic.
+
+
+────────────────────────────────────────────────────────────────────────────────
+  2. rvllm's Seven-Module Architecture
+────────────────────────────────────────────────────────────────────────────────
+
+  rvllm strips away the distributed-systems plumbing and exposes the seven
+  concepts you actually need to understand LLM inference:
+
+  ┌────────────┐   ┌────────────┐   ┌────────────┐   ┌────────────┐
+  │   api/     │   │  engine/   │   │ scheduler/ │   │  memory/   │
+  │            │──▶│            │──▶│            │──▶│            │
+  │ HTTP API   │   │ Inference  │   │ Queuing &  │   │ KV cache   │
+  │ (OpenAI)   │   │ loop       │   │ batching   │   │ blocks     │
+  └────────────┘   └────────────┘   └────────────┘   └────────────┘
+                         │                                  │
+                         ▼                                  ▼
+  ┌────────────┐   ┌────────────┐                    ┌────────────┐
+  │ tokenizer/ │   │   model/   │                    │ sampling/  │
+  │            │   │            │                    │            │
+  │ Text ↔     │   │ Forward    │───────────────────▶│ Token      │
+  │ tokens     │   │ pass       │  (logits)          │ selection  │
+  └────────────┘   └────────────┘                    └────────────┘
+
+  ┌─────────────────────────────────────────────────────────────────┐
+  │  Module         │  Responsibility                               │
+  ├─────────────────┼───────────────────────────────────────────────┤
+  │  api/           │  HTTP API layer (OpenAI-compatible)           │
+  │  engine/        │  Inference loop orchestration                 │
+  │  scheduler/     │  Request queuing, batching, preemption        │
+  │  model/         │  Forward pass (transformer layers)            │
+  │  memory/        │  KV cache block management (PagedAttention)   │
+  │  sampling/      │  Token selection (greedy, top-k, top-p)       │
+  │  tokenizer/     │  Text <-> tokens conversion                   │
+  └─────────────────┴───────────────────────────────────────────────┘
+
+  Seven modules. Each one maps to a concept you can study, build, and test
+  independently. No IPC. No multi-process coordination. Just the core logic.
+
+
+────────────────────────────────────────────────────────────────────────────────
+  3. Mapping: vLLM Component -> rvllm Module -> Book Chapter
+────────────────────────────────────────────────────────────────────────────────
+
+  ┌──────────────────────────┬─────────────────┬───────────────────────────────┐
+  │  vLLM Component          │  rvllm Module   │  Book Chapter                 │
+  ├──────────────────────────┼─────────────────┼───────────────────────────────┤
+  │  FastAPI HTTP Server     │  api/           │  Ch 10: API & Streaming       │
+  │  AsyncLLM                │  engine/        │  Ch 11: Putting It Together   │
+  │  EngineCoreClient (ZMQ)  │  (removed)      │  --                           │
+  │  Scheduler               │  scheduler/     │  Ch 5: The Scheduler          │
+  │  BlockManager            │  memory/        │  Ch 6: Memory & PagedAttn     │
+  │  MultiprocExecutor       │  (removed)      │  --                           │
+  │  GPUModelRunner          │  model/         │  Ch 7-8: Model & Attention    │
+  │  SamplingParams          │  sampling/      │  Ch 9: Sampling               │
+  │  (tokenizer utils)       │  tokenizer/     │  Ch 4: Tokenization           │
+  │  (transformer layers)    │  model/         │  Ch 3: Transformer Primer     │
+  └──────────────────────────┴─────────────────┴───────────────────────────────┘
+
+  Two vLLM layers vanish entirely in rvllm:
+    - EngineCoreClient (ZMQ IPC) — we run in a single process
+    - MultiprocExecutor          — we target a single GPU
+
+
+────────────────────────────────────────────────────────────────────────────────
+  4. Request Lifecycle: A Token's Journey
+────────────────────────────────────────────────────────────────────────────────
+
+  Let's trace a single request — "Explain PagedAttention" — through rvllm.
+
+  Step 1: ARRIVE
+  ──────────────
+    An HTTP POST hits the api/ module:
+      POST /v1/completions { "prompt": "Explain PagedAttention", ... }
+    The api module validates the request, extracts parameters.
+
+  Step 2: TOKENIZE
+  ────────────────
+    The tokenizer/ module converts text to token IDs:
+      "Explain PagedAttention" -> [50872, 7873, 58662]
+    These IDs are what the model actually processes.
+
+  Step 3: ENQUEUE
+  ───────────────
+    The scheduler/ adds this sequence to the WAITING queue:
+      waiting:  [ Seq(id=42, tokens=[50872, 7873, 58662], blocks=[]) ]
+      running:  [ ... other sequences ... ]
+
+  Step 4: SCHEDULE
+  ────────────────
+    The scheduler/ decides what runs in the next iteration:
+      - Can we fit Seq(42) in the running batch?
+      - Do we have enough free KV cache blocks?
+      - Should we preempt a lower-priority sequence?
+    Result: Seq(42) moves from WAITING -> RUNNING.
+
+  Step 5: ALLOCATE
+  ────────────────
+    The memory/ module assigns KV cache blocks:
+      Seq(42) needs 1 block (3 tokens fit in block_size=16)
+      Free blocks: 254 -> 253
+      Block table: { 42: [block_7] }
+
+  Step 6: EXECUTE
+  ───────────────
+    The model/ module runs the forward pass:
+      - Embed token IDs into vectors
+      - Pass through N transformer layers (attention + FFN)
+      - Produce logits: a probability distribution over the vocabulary
+
+  Step 7: SAMPLE
+  ──────────────
+    The sampling/ module picks the next token from logits:
+      logits = [0.01, 0.03, ..., 0.42, ...]  (vocab_size values)
+      With temperature=0 (greedy): pick argmax -> token 1334 ("Paged")
+
+  Step 8: UPDATE
+  ──────────────
+    The engine/ appends the new token and checks stopping criteria:
+      Seq(42).tokens = [50872, 7873, 58662, 1334]
+      Stop? No (not EOS, not max_tokens). Keep going.
+
+  Step 9: RESPOND
+  ───────────────
+    The api/ module streams the token back to the client:
+      data: {"choices": [{"text": "Paged"}]}
+
+  ┌─────────────────────────────────────────────────────────────────────┐
+  │                                                                     │
+  │    Steps 4-8 repeat for every new token until:                      │
+  │      - The model outputs an end-of-sequence (EOS) token             │
+  │      - We hit max_tokens                                            │
+  │      - The client disconnects                                       │
+  │                                                                     │
+  │    For "Explain PagedAttention" with max_tokens=100, this loop      │
+  │    might run 100 times — one forward pass per token.                │
+  │                                                                     │
+  └─────────────────────────────────────────────────────────────────────┘
+
+
+────────────────────────────────────────────────────────────────────────────────
+  5. Key Simplifications: What rvllm Drops (and Why)
+────────────────────────────────────────────────────────────────────────────────
+
+  rvllm is a learning implementation. We intentionally drop production
+  features that add complexity without teaching core concepts:
+
+  ┌───────────────────────────────┬─────────────────────────────────────────┐
+  │  Dropped Feature              │  Why It's OK                            │
+  ├───────────────────────────────┼─────────────────────────────────────────┤
+  │  ZMQ IPC                      │  Single process — direct function       │
+  │  (EngineCoreClient)           │  calls replace socket messaging.        │
+  ├───────────────────────────────┼─────────────────────────────────────────┤
+  │  Multi-GPU support            │  Single GPU keeps memory management     │
+  │  (MultiprocExecutor)          │  simple. No tensor parallelism yet.     │
+  ├───────────────────────────────┼─────────────────────────────────────────┤
+  │  CUDA graphs                  │  We'll add these later for perf.        │
+  │                               │  Not needed to understand the core.     │
+  ├───────────────────────────────┼─────────────────────────────────────────┤
+  │  Speculative decoding         │  An optimization on top of the base     │
+  │                               │  loop. We'll cover it in a later ch.    │
+  ├───────────────────────────────┼─────────────────────────────────────────┤
+  │  LoRA / adapter support       │  Adds memory management complexity.     │
+  │                               │  The base system comes first.           │
+  └───────────────────────────────┴─────────────────────────────────────────┘
+
+  The goal: understand every line of code you're running. No magic,
+  no "this talks to another process somewhere." Just seven modules
+  doing exactly what you'd expect.
+
+
+================================================================================
+  What's Next?
+================================================================================
+
+  Now you've seen the map. In Chapter 3, we zoom into the transformer —
+  the model/ module — and build the forward pass from scratch. Attention
+  heads, layer norms, feed-forward networks: the engine that turns tokens
+  into predictions.
+
+  But here's the question that will haunt us: the KV cache grows with
+  every token. For a batch of 32 sequences, each generating 2048 tokens,
+  that's a LOT of GPU memory. How do we manage it without running out?
+
+  That's the problem PagedAttention solves. And we'll build it in Chapter 6.
+================================================================================
+

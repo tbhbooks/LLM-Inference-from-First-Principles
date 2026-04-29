@@ -1,0 +1,141 @@
+
+==============================================================================
+  PART 1: Block Allocation — One Request at a Time
+==============================================================================
+
+  Block size: 16 tokens
+  Total pool: 160 slots (10 blocks)
+
+  Request A needs 37 tokens.
+  Blocks needed: ceil(37 / 16) = 3
+  Allocated blocks: [0, 1, 2]
+  Capacity: 48 token slots
+  Waste: 11 slots in last block (37 used of 48)
+
+  Slot mapping:
+    Token  0 → block 0, offset  0 → physical slot   0
+    Token 16 → block 1, offset  0 → physical slot  16
+    Token 36 → block 2, offset  4 → physical slot  36
+
+  Free blocks remaining: 7 / 10
+
+==============================================================================
+  PART 2: Multiple Requests — Sharing the Pool
+==============================================================================
+
+  Three requests with different token counts:
+
+  Request A: 10 tokens → 1 block  (waste: 6)
+  Request B: 25 tokens → 2 blocks (waste: 7)
+  Request C: 50 tokens → 4 blocks (waste: 14)
+
+  Total: 7 blocks used, 3 free
+  Total waste: 27 slots (in last blocks only)
+
+  Compare with contiguous (max_seq_len=50):
+    Contiguous: 50 × 3 = 150 slots. Only 2 fit in 160. 1 REJECTED.
+    Paged:      7 blocks = 112 slots. All 3 fit. 3 blocks free.
+
+==============================================================================
+  PART 3: Arrival and Departure — No Fragmentation
+==============================================================================
+
+  Step 1: Allocate A (10 tokens, 1 block)    → 9 free blocks
+  Step 2: Allocate B (25 tokens, 2 blocks)   → 7 free blocks
+  Step 3: Allocate C (50 tokens, 4 blocks)   → 3 free blocks
+  Step 4: Free B (return 2 blocks)           → 5 free blocks
+  Step 5: Allocate D (40 tokens, 3 blocks)   → 2 free blocks
+
+  D's blocks: [3, 4, 5]
+  Note: these may include B's recycled blocks. Non-contiguous? No problem.
+
+  With contiguous allocation, freeing B would create a gap.
+  A new request needing 40 contiguous slots might FAIL despite free space.
+  With paging: blocks are interchangeable. No fragmentation. Ever.
+
+==============================================================================
+  PART 4: The Slot Mapping — Virtual to Physical
+==============================================================================
+
+  Request with 37 tokens, blocks [4, 1, 7]:
+
+  Token  Block_Idx  Block_ID  Offset  Physical_Slot
+  ─────  ─────────  ────────  ──────  ─────────────
+      0          0         4       0             64
+      8          0         4       8             72
+     16          1         1       0             16
+     24          1         1       8             24
+     32          2         7       0            112
+     36          2         7       4            116
+
+  Physical slots: 64, 72, 16, 24, 112, 116
+  NOT contiguous — and that is the whole point.
+
+  The attention kernel reads:
+    K[token_pos] = kv_cache[physical_slot(token_pos)]
+
+  The block table is the page table. The slot mapping is address translation.
+
+==============================================================================
+  PART 5: Head-to-Head — Contiguous vs Paged
+==============================================================================
+
+  Pool: 160 slots (10 blocks of 16)
+  Requests: A(10), B(25), C(8), D(15), E(12)
+  Contiguous max_seq_len: 40
+
+  Method        Served  Slots Used  Waste %  Free Slots
+  ──────────    ──────  ──────────  ───────  ──────────
+  Contiguous    4       160         63.8%    0
+  Paged         5       96          26.0%    64
+
+  Paged serves ALL 5 requests with 64 slots still free.
+  Contiguous rejects 1 request with 0 slots free.
+
+==============================================================================
+  PART 6: Why This Changes Everything
+==============================================================================
+
+  PagedAttention delivers:
+
+  1. Near-zero internal waste
+     Only the last block of each request has unused slots.
+     Worst case: block_size - 1 = 15 slots per request.
+
+  2. Zero external fragmentation
+     Blocks are interchangeable. A freed block can be used by any request.
+     No "gaps too small to fill."
+
+  3. Dynamic growth
+     Allocate one block at a time as the sequence grows.
+     No need to reserve max_seq_len upfront.
+
+  4. Copy-on-write (future)
+     Multiple sequences can share blocks (ref_count > 1).
+     Only copy when one sequence modifies a shared block.
+
+  This is why vLLM serves 10-20x more concurrent requests than naive engines.
+
+==============================================================================
+  Chapter 10 complete. Next: Continuous Batching (ch11)
+==============================================================================
+
+# ============================================================
+# VALIDATION RULES (what the test suite checks):
+# ============================================================
+#
+# 1. SECTION HEADERS
+#    All 6 parts present: "PART 1" through "PART 6"
+#
+# 2. BLOCK CONCEPTS
+#    "block" mentioned (allocation unit)
+#    Block IDs shown (numeric)
+#    "16" present (block size)
+#    "slot" mentioned (physical addressing)
+#
+# 3. COMPARISON
+#    Paged serves more requests than contiguous
+#    "waste" or "fragmentation" comparison terms
+#
+# 4. CLOSING
+#    "Chapter 10 complete"

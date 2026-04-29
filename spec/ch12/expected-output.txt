@@ -1,0 +1,356 @@
+
+==============================================================================
+  PART 1: Three Queues and a GPU
+==============================================================================
+
+  The scheduler manages three queues:
+    waiting  — requests that have arrived but not yet scheduled
+    running  — requests actively generating tokens on the GPU
+    swapped  — requests preempted due to memory pressure
+
+  Config:
+    max_num_seqs: 4            (max 4 sequences in the running batch)
+    max_num_batched_tokens: 64 (max 64 tokens per iteration)
+    block_size: 16             (16 tokens per KV cache block)
+    num_blocks: 10             (10 physical blocks in the pool)
+
+  Requests:
+    R0: prompt=4 tokens (1 block)
+    R1: prompt=4 tokens (1 block)
+    R2: prompt=4 tokens (1 block)
+    R3: prompt=4 tokens (1 block)
+    R4: prompt=4 tokens (1 block)
+    R5: prompt=4 tokens (1 block)
+
+  --- Step 1: Initial schedule() ---
+  Admit R0, R1, R2, R3 (batch full at max_num_seqs=4)
+  R4, R5 remain in waiting queue
+
+  Queue state:
+    waiting: [R4, R5]
+    running: [R0, R1, R2, R3]
+    swapped: []
+
+  --- Step 2: R0 finishes ---
+  notify_finished(R0) → R0 removed, blocks freed
+  schedule() → admits R4 from waiting
+
+  Queue state:
+    waiting: [R5]
+    running: [R1, R2, R3, R4]
+    swapped: []
+
+  --- Step 3: R1 finishes ---
+  notify_finished(R1) → R1 removed, blocks freed
+  schedule() → admits R5 from waiting
+
+  Queue state:
+    waiting: []
+    running: [R2, R3, R4, R5]
+    swapped: []
+
+==============================================================================
+  PART 2: The Schedule Step
+==============================================================================
+
+  Detailed walkthrough of one schedule() call:
+
+  State before schedule():
+    waiting: [R4, R5]
+    running: [R0, R1, R2, R3]
+    swapped: []
+    free blocks: 6
+
+  Phase 1: Check running requests
+    R0: needs 0 new blocks (last block has room) → keep. Budget: 63 tokens, 3 seqs
+    R1: needs 0 new blocks → keep. Budget: 62 tokens, 2 seqs
+    R2: needs 0 new blocks → keep. Budget: 61 tokens, 1 seq
+    R3: needs 0 new blocks → keep. Budget: 60 tokens, 0 seqs
+
+  Phase 2: Resume swapped
+    Swapped queue is empty. Nothing to do.
+
+  Phase 3: Admit from waiting
+    seq_budget = 0 (all 4 slots taken by running requests)
+    Cannot admit R4 or R5 — batch is full.
+
+  Result:
+    SchedulerOutput {
+      new_requests: []
+      running_requests: [R0, R1, R2, R3]
+      preempted_ids: []
+      num_prefill_tokens: 0
+      num_decode_tokens: 4
+    }
+
+  Now suppose R0 finishes and schedule() is called again:
+
+  Phase 1: Check running requests
+    R1, R2, R3 continue. Budget: 61 tokens, 1 seq remaining.
+
+  Phase 2: Resume swapped
+    Empty. Skip.
+
+  Phase 3: Admit from waiting
+    R4: prompt=4 tokens, needs 1 block.
+    can_allocate(1) = true (7 free blocks after R0 freed)
+    token_budget (61) >= 4? Yes.
+    Admit R4!
+    Budget: 57 tokens, 0 seqs.
+
+  Result:
+    SchedulerOutput {
+      new_requests: [R4]
+      running_requests: [R1, R2, R3]
+      preempted_ids: []
+      num_prefill_tokens: 4
+      num_decode_tokens: 3
+    }
+
+==============================================================================
+  PART 3: Memory-Aware Admission
+==============================================================================
+
+  Setup: 10 blocks, each request needs 2 blocks (prompt=20 tokens)
+
+  Requests:
+    R0: 20 tokens → 2 blocks
+    R1: 20 tokens → 2 blocks
+    R2: 20 tokens → 2 blocks
+    R3: 20 tokens → 2 blocks
+    R4: 20 tokens → 2 blocks
+    R5: 20 tokens → 2 blocks
+
+  --- schedule() step 1 ---
+  Admit R0: can_allocate(2) = true (10 free). Allocate. 8 free.
+  Admit R1: can_allocate(2) = true (8 free).  Allocate. 6 free.
+  Admit R2: can_allocate(2) = true (6 free).  Allocate. 4 free.
+  Admit R3: can_allocate(2) = true (4 free).  Allocate. 2 free.
+  seq_budget exhausted (max_num_seqs=4).
+
+  Queue state:
+    waiting: [R4, R5]
+    running: [R0, R1, R2, R3]
+    free blocks: 2
+
+  --- schedule() step 2 (all still running) ---
+  Phase 1: R0-R3 continue (no new blocks needed yet). Budget: 0 seqs.
+  Phase 3: Cannot admit — batch full.
+
+  --- R0 finishes, schedule() step 3 ---
+  R0 freed → 2 blocks returned → 4 free.
+  Phase 1: R1, R2, R3 continue. Budget: 1 seq.
+  Phase 3: R4 needs 2 blocks. can_allocate(2) = true (4 free). Admit!
+  Free blocks: 2.
+
+  --- All running, no finishes, schedule() step 4 ---
+  R1-R4 continue. Budget: 0 seqs.
+  R5 waits. can_allocate(2) = true (2 free) but no seq_budget.
+
+  The scheduler respects BOTH memory AND batch-size limits.
+
+==============================================================================
+  PART 4: When Memory Runs Out — Preemption
+==============================================================================
+
+  Setup: 6 blocks total, block_size=16, max_num_seqs=3
+
+  Requests already running:
+    R0: 20 tokens (2 blocks), growing
+    R1: 20 tokens (2 blocks), growing
+    R2: 16 tokens (1 block), growing
+
+  Free blocks: 1
+
+  --- R0, R1, R2 all decode one token ---
+  R0: 21 tokens → still fits in 2 blocks (capacity 32). Needs 0 new blocks.
+  R1: 21 tokens → still fits in 2 blocks. Needs 0 new blocks.
+  R2: 17 tokens → still fits in 1 block (was 16/16, now needs block 2!)
+       blocks_for_next_token(R2) = 1
+
+  R2 needs 1 block. free_blocks = 1. can_allocate(1) = true. OK.
+
+  --- Next decode step ---
+  R0: 22 tokens → 2 blocks, OK.
+  R1: 22 tokens → 2 blocks, OK.
+  R2: 18 tokens → 2 blocks, OK.
+  free_blocks = 0.
+
+  --- Another decode step ---
+  All three at 32 tokens → R0 and R1 both need block 3!
+  R0: 33 tokens → needs 3 blocks, has 2. blocks_for_next_token = 1.
+  R1: 33 tokens → needs 3 blocks, has 2. blocks_for_next_token = 1.
+  free_blocks = 0. can_allocate(1) = false!
+
+  PREEMPTION triggered!
+
+  === Swap Policy ===
+  Preempt R2 (last-admitted, lowest FCFS priority)
+  R2 → Swapped queue (blocks marked for potential recovery)
+  Free 2 blocks from R2 → free_blocks = 2.
+  R0 gets 1 block. R1 gets 1 block. free_blocks = 0.
+
+  Queue state:
+    running: [R0, R1]
+    swapped: [R2]
+    preempted_ids: [R2]
+
+  === Recompute Policy (alternative) ===
+  Preempt R2 → free ALL its blocks → R2 goes back to waiting
+  R2 will redo prefill when re-admitted.
+
+  Queue state:
+    running: [R0, R1]
+    waiting: [R2]  (at front — gets re-admitted first)
+    preempted_ids: [R2]
+
+==============================================================================
+  PART 5: A Day in the Scheduler's Life
+==============================================================================
+
+  Config: 8 blocks, block_size=16, max_num_seqs=3
+
+  Requests:
+    R0: prompt=4 tokens, max_output=30
+    R1: prompt=4 tokens, max_output=30
+    R2: prompt=4 tokens, max_output=5
+    R3: prompt=4 tokens, max_output=30
+
+  --- Step 1: schedule() ---
+  Phase 1: no running requests.
+  Phase 3: Admit R0 (1 block, 7 free), R1 (1 block, 6 free), R2 (1 block, 5 free).
+           seq_budget=0. R3 waits.
+
+    waiting: [R3]    running: [R0, R1, R2]    swapped: []
+
+  --- Step 2: schedule() (all decode) ---
+  Phase 1: R0(5 tok), R1(5 tok), R2(5 tok) — all fit in 1 block. No new blocks.
+  Phase 3: No seq budget.
+
+    waiting: [R3]    running: [R0, R1, R2]    swapped: []
+
+  --- Step 3: R2 finishes after 5 output tokens ---
+  notify_finished(R2). Free 1 block → 6 free.
+  Phase 1: R0(9 tok), R1(9 tok) — still 1 block each. Continue.
+  Phase 3: R3 needs 1 block. can_allocate(1) = true. Admit R3!
+
+    waiting: []    running: [R0, R1, R3]    swapped: []
+
+  --- Step 4: Sequences grow, memory pressure ---
+  R0 at 17 tokens → needs 2nd block. Allocate. 5 free → 4 free.
+  R1 at 17 tokens → needs 2nd block. Allocate. 4 free → 3 free.
+  R3 at 5 tokens → still 1 block. OK.
+  ...after more growth...
+  R0 at 33 tokens → needs 3rd block. 1 free → 0 free.
+  R1 at 33 tokens → needs 3rd block. 0 free! PREEMPT!
+
+  Preempt R3 (last admitted, lowest FCFS priority).
+  R3 → swapped. Free 2 blocks → 2 free.
+  R1 gets its 3rd block. 1 free.
+
+    waiting: []    running: [R0, R1]    swapped: [R3]
+
+  --- Step 5: R1 finishes ---
+  notify_finished(R1). Free 3 blocks → 4 free.
+  Phase 2: Resume R3 from swapped. Restore blocks. 2 free.
+  Phase 3: No waiting requests.
+
+    waiting: []    running: [R0, R3]    swapped: []
+
+  Lifecycle of R3:
+    Waiting → Running → Swapped → Running → (eventually) Finished
+
+==============================================================================
+  PART 6: The Scheduler Contract
+==============================================================================
+
+  The SchedulerOutput tells the engine exactly what to do:
+
+  Step 1:
+    SchedulerOutput {
+      new_requests: [R0, R1, R2]    // all need prefill
+      running_requests: []           // nobody was running before
+      preempted_ids: []
+      num_prefill_tokens: 12         // 4+4+4 prompt tokens
+      num_decode_tokens: 0
+    }
+
+  Step 2:
+    SchedulerOutput {
+      new_requests: []
+      running_requests: [R0, R1, R2]
+      preempted_ids: []
+      num_prefill_tokens: 0
+      num_decode_tokens: 3           // 1 token each
+    }
+
+  Step 3 (R2 finishes, R3 enters):
+    SchedulerOutput {
+      new_requests: [R3]             // needs prefill
+      running_requests: [R0, R1]
+      preempted_ids: []
+      num_prefill_tokens: 4          // R3's prompt
+      num_decode_tokens: 2           // R0, R1 decode
+    }
+
+  Step 4 (memory pressure, preempt R3):
+    SchedulerOutput {
+      new_requests: []
+      running_requests: [R0, R1]
+      preempted_ids: [R3]            // R3 preempted!
+      num_prefill_tokens: 0
+      num_decode_tokens: 2
+    }
+
+  Step 5 (R1 finishes, R3 resumes from swapped):
+    SchedulerOutput {
+      new_requests: []
+      running_requests: [R0, R3]     // R3 resumed!
+      preempted_ids: []
+      num_prefill_tokens: 0
+      num_decode_tokens: 2
+    }
+
+  The Scheduler trait:
+    schedule() -> SchedulerOutput
+    add_request(group)
+    notify_finished(group_id)
+    num_waiting() -> int
+    num_running() -> int
+    num_swapped() -> int
+
+  The engine calls schedule() every iteration. The SchedulerOutput is the
+  complete instruction set — the engine does not make scheduling decisions.
+  It just executes what the scheduler says.
+
+==============================================================================
+  Chapter 12 complete. Next: The Engine Loop (ch13)
+==============================================================================
+
+# ============================================================
+# VALIDATION RULES (what the test suite checks):
+# ============================================================
+#
+# 1. SECTION HEADERS
+#    All 6 parts present: "PART 1" through "PART 6"
+#
+# 2. THREE QUEUES
+#    "waiting", "running", "swapped" all mentioned
+#
+# 3. SCHEDULING
+#    "schedule" mentioned (the schedule() method)
+#
+# 4. PREEMPTION
+#    "preempt" or "preemption" mentioned
+#
+# 5. MEMORY AWARENESS
+#    "block" or "memory" mentioned (memory-aware admission)
+#
+# 6. SCHEDULER OUTPUT
+#    "new_requests" or "prefill", "running" or "decode", "preempted"
+#
+# 7. MULTI-STEP SIMULATION
+#    Queue state changes shown across multiple steps
+#
+# 8. CLOSING
+#    "Chapter 12 complete"

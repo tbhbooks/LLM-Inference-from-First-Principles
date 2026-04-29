@@ -1,0 +1,185 @@
+# Chapter 17 -- Expected Output Format
+#
+# The demo uses mock draft and target models (no real model loading),
+# so acceptance decisions are deterministic. This spec defines the
+# OUTPUT STRUCTURE that the validation tests check against.
+#
+# Lines starting with # are comments and not part of the output.
+
+=== PART 1: The Problem — GPU Starvation During Decode ===
+
+During autoregressive decode, the GPU processes ONE token per forward pass.
+The forward pass is memory-bandwidth-bound: weights stream from HBM to
+compute units, but there isn't enough arithmetic work to keep the GPU busy.
+
+  Standard decode:
+    Step 1: forward(context)           → 1 token   (GPU ~30% utilized)
+    Step 2: forward(context + token1)  → 1 token   (GPU ~30% utilized)
+    Step 3: forward(context + token2)  → 1 token   (GPU ~30% utilized)
+    ...
+    N tokens require N forward passes.
+
+Speculative decoding: draft K tokens cheaply, verify all K in ONE target pass.
+If the draft model guessed right, we get K+1 tokens for the cost of 1 pass.
+
+=== PART 2: The Draft Phase — Proposing Tokens Cheaply ===
+
+Draft model: small/cheap model that proposes K=4 candidate tokens.
+The draft doesn't need to be perfect — it just needs to be right often enough.
+
+  Context: [token_10, token_20, token_30]
+  Draft step 0: forward → logits → argmax → token_40
+  Draft step 1: forward → logits → argmax → token_50
+  Draft step 2: forward → logits → argmax → token_60
+  Draft step 3: forward → logits → argmax → token_70
+
+  DraftResult:
+    proposed_tokens: [token_40, token_50, token_60, token_70]
+    K = 4 tokens drafted
+
+# Draft uses greedy (argmax). The draft model is much smaller than the target.
+# K draft passes should cost less than 1 target pass.
+
+=== PART 3: The Verify Phase — Accept or Reject ===
+
+Target model processes ALL draft tokens in one forward pass,
+producing logits for each position.
+
+--- Scenario 1: Full Accept (best case) ---
+
+  Draft tokens:   [40, 50, 60, 70]
+  Target argmax:  [40, 50, 60, 70, 80]
+
+  Position 0: argmax(target_logits[0]) = 40 == draft[0] = 40  ✓ ACCEPT
+  Position 1: argmax(target_logits[1]) = 50 == draft[1] = 50  ✓ ACCEPT
+  Position 2: argmax(target_logits[2]) = 60 == draft[2] = 60  ✓ ACCEPT
+  Position 3: argmax(target_logits[3]) = 70 == draft[3] = 70  ✓ ACCEPT
+  All accepted! Bonus: argmax(target_logits[4]) = 80
+
+  Result: accepted=4/4, bonus=80, total=5 tokens in 1 target pass
+
+--- Scenario 2: Partial Accept ---
+
+  Draft tokens:   [40, 50, 60, 70]
+  Target argmax:  [40, 50, 65, -, -]
+
+  Position 0: argmax(target_logits[0]) = 40 == draft[0] = 40  ✓ ACCEPT
+  Position 1: argmax(target_logits[1]) = 50 == draft[1] = 50  ✓ ACCEPT
+  Position 2: argmax(target_logits[2]) = 65 != draft[2] = 60  ✗ REJECT
+  STOP — remaining positions skipped.
+  Bonus: argmax(target_logits[2]) = 65
+
+  Result: accepted=2/4, bonus=65, total=3 tokens in 1 target pass
+
+--- Scenario 3: Immediate Reject (worst case) ---
+
+  Draft tokens:   [40, 50, 60, 70]
+  Target argmax:  [45, -, -, -, -]
+
+  Position 0: argmax(target_logits[0]) = 45 != draft[0] = 40  ✗ REJECT
+  STOP — all remaining positions skipped.
+  Bonus: argmax(target_logits[0]) = 45
+
+  Result: accepted=0/4, bonus=45, total=1 token in 1 target pass
+  (Same as standard decode — no speedup, but no degradation either)
+
+=== PART 4: The Speedup — More Tokens Per Pass ===
+
+Without speculation:
+  Every step produces exactly 1 token.
+  10 tokens = 10 target forward passes.
+
+With speculation (K=4):
+  Scenario A (100% accept): 5 tokens per target pass → 5x speedup
+  Scenario B (50% accept):  3 tokens per target pass → 3x speedup
+  Scenario C (0% accept):   1 token per target pass  → 1x (no loss)
+
+  Formula: avg_tokens_per_pass = K * acceptance_rate + 1
+
+  Example: K=4, acceptance_rate=75%
+    avg_tokens = 4 * 0.75 + 1 = 4.0 tokens per target pass
+    Speedup: 4.0x
+
+# The draft model's forward passes add overhead, but since the draft model
+# is much smaller, K draft passes << 1 target pass in wall-clock time.
+
+=== PART 5: Acceptance Rate — Tracking Performance ===
+
+Running 20 speculative decode steps (K=4 each):
+
+  Step  1: drafted=4, accepted=4, bonus=1, total=5, rate=100.0%
+  Step  2: drafted=4, accepted=3, bonus=1, total=4, rate= 87.5%
+  Step  3: drafted=4, accepted=4, bonus=1, total=5, rate= 91.7%
+  Step  4: drafted=4, accepted=2, bonus=1, total=3, rate= 81.3%
+  Step  5: drafted=4, accepted=4, bonus=1, total=5, rate= 85.0%
+  Step  6: drafted=4, accepted=1, bonus=1, total=2, rate= 75.0%
+  Step  7: drafted=4, accepted=3, bonus=1, total=4, rate= 75.0%
+  Step  8: drafted=4, accepted=4, bonus=1, total=5, rate= 78.1%
+  Step  9: drafted=4, accepted=0, bonus=1, total=1, rate= 72.2%
+  Step 10: drafted=4, accepted=3, bonus=1, total=4, rate= 70.0%
+  Step 11: drafted=4, accepted=4, bonus=1, total=5, rate= 72.7%
+  Step 12: drafted=4, accepted=2, bonus=1, total=3, rate= 70.8%
+  Step 13: drafted=4, accepted=3, bonus=1, total=4, rate= 69.2%
+  Step 14: drafted=4, accepted=4, bonus=1, total=5, rate= 71.4%
+  Step 15: drafted=4, accepted=3, bonus=1, total=4, rate= 71.7%
+  Step 16: drafted=4, accepted=2, bonus=1, total=3, rate= 70.3%
+  Step 17: drafted=4, accepted=4, bonus=1, total=5, rate= 72.1%
+  Step 18: drafted=4, accepted=1, bonus=1, total=2, rate= 69.4%
+  Step 19: drafted=4, accepted=3, bonus=1, total=4, rate= 69.7%
+  Step 20: drafted=4, accepted=3, bonus=1, total=4, rate= 70.0%
+
+Summary:
+  Total drafted:  80 tokens
+  Total accepted: 56 tokens
+  Acceptance rate: 70.0%
+  Average tokens per target pass: 3.80
+  Speedup vs standard decode: 3.80x
+
+Chapter 17 complete. Next: Structured Output (ch18)
+
+# ============================================================
+# VALIDATION RULES (what the test suite checks):
+# ============================================================
+#
+# 1. ALL 5 PARTS PRESENT
+#    Output must contain all 5 section headers (PART 1 through PART 5)
+#    or equivalent section markers.
+#
+# 2. DRAFT PHASE
+#    Must show draft tokens being proposed.
+#    Must mention "draft" (case-insensitive).
+#
+# 3. VERIFY PHASE
+#    Must show accept/reject decisions at each position.
+#    Must mention "accept" and "reject" (case-insensitive).
+#
+# 4. FULL ACCEPT
+#    Must show a scenario where all K tokens are accepted.
+#    Must show bonus token.
+#
+# 5. PARTIAL ACCEPT
+#    Must show a scenario where some tokens accepted, some rejected.
+#
+# 6. IMMEDIATE REJECT
+#    Must show a scenario where the first draft token is rejected.
+#    Total tokens = 1.
+#
+# 7. ACCEPTANCE RATE
+#    Must show acceptance rate as percentage or ratio.
+#    Must mention "acceptance" or "accept rate" (case-insensitive).
+#
+# 8. SPEEDUP
+#    Must show speedup comparison (tokens per pass).
+#    Must mention "speedup" or "tokens per pass" (case-insensitive).
+#
+# 9. COMPLETION MARKER
+#    Output must contain "Chapter 17 complete".
+#
+# ============================================================
+# NOTES ON VARIANCE:
+# ============================================================
+#
+# - The demo uses mock models, so decisions are deterministic.
+# - The exact token IDs may vary between implementations.
+# - Acceptance rates in the 20-step run may vary if random mocks are used.
+# - Tests check structure and concepts, not exact numeric values.

@@ -1,0 +1,149 @@
+
+==============================================================================
+  PART 1: Internal Fragmentation — The Waste Problem
+==============================================================================
+
+  Three requests arrive. Each is allocated a contiguous buffer of 30 slots
+  (max_seq_len), even though they use far fewer tokens.
+
+  Step 1: Allocate Request A (10 tokens, 30 slots reserved)
+  [00] AAAAAAAAAAAAAAAAAAAAAAAAAAAAAA....................
+  [50] ..................................................
+  Utilization: 30.0% | Waste for A: 20 slots (10 used of 30)
+
+  Step 2: Allocate Request B (25 tokens, 30 slots reserved)
+  [00] AAAAAAAAAAAAAAAAAAAAAAAAAAAAAABBBBBBBBBBBBBBBBBBBB
+  [50] BBBBBBBBBB........................................
+  Utilization: 60.0% | Waste for B: 5 slots (25 used of 30)
+
+  Step 3: Allocate Request C (8 tokens, 30 slots reserved)
+  [00] AAAAAAAAAAAAAAAAAAAAAAAAAAAAAABBBBBBBBBBBBBBBBBBBB
+  [50] BBBBBBBBBBCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC..........
+  Utilization: 90.0% | Waste for C: 22 slots (8 used of 30)
+
+  Summary:
+    Slots allocated:  90 / 100
+    Tokens actually used: 43
+    Internal waste: 47 slots (52.2%)
+
+==============================================================================
+  PART 2: External Fragmentation — The Tetris Problem
+==============================================================================
+
+  Five requests fill most of memory. Then two depart, creating gaps.
+
+  After allocating A(20), B(15), C(25), D(15), E(10):
+  [00] AAAAAAAAAAAAAAAAAAAABBBBBBBBBBBBBBBBCCCCCCCCCCCCC
+  [50] CCCCCCCCCCCCDDDDDDDDDDDDDDDEEEEEEEEEEE...........
+
+  Deallocate B and D:
+  [00] AAAAAAAAAAAAAAAAAAAA...............CCCCCCCCCCCCC
+  [50] CCCCCCCCCCCC...............EEEEEEEEEEE...........
+
+  Memory status:
+    Total free: 45 slots
+    Largest contiguous block: 15 slots
+    Free fragments: 3
+
+  Attempt to allocate Request F (25 contiguous slots): FAILED!
+
+  45 free slots — but the largest contiguous block is only 15.
+  The memory is there. We just can't use it.
+
+==============================================================================
+  PART 3: The Scaling Wall
+==============================================================================
+
+  How many concurrent requests fit with max_seq_len = 30?
+
+  Request 1 (A): allocated slots 0-29   [OK]
+  Request 2 (B): allocated slots 30-59  [OK]
+  Request 3 (C): allocated slots 60-89  [OK]
+  Request 4 (D): no contiguous block of 30 available  [FAILED]
+
+  Result: 3 requests fit. 10 slots wasted (10.0%).
+  That's 10% of memory you can never use — and it gets worse
+  as max_seq_len grows relative to total memory.
+
+==============================================================================
+  PART 4: From RAM to VRAM — The OS Analogy
+==============================================================================
+
+  Operating systems solved this exact problem decades ago.
+
+  Concept               OS Virtual Memory        Naive KV Cache           Paged KV Cache
+  ---------------------------------------------------------------------------------------
+  Allocation unit       Page (4 KB)              Contiguous buffer        Block (16 tokens)
+  Fragmentation         Solved by paging         Internal + external      Solved by paging
+  Waste                 < 1 page per alloc       Up to max_seq_len - 1   < 1 block per alloc
+  Address mapping       Page table               None (direct)            Block table
+  Concurrent users      Thousands                Single digits            Hundreds
+
+==============================================================================
+  PART 5: What Paging Would Fix
+==============================================================================
+
+  If we split the KV cache into fixed-size blocks (like OS pages):
+
+  - Internal waste: drops from ~52% to less than 1 block per request
+  - External fragmentation: eliminated — blocks need not be contiguous
+  - Memory utilization: near 100% instead of 50-60%
+  - Concurrent requests: 3-10x more with the same GPU memory
+
+  Instead of:
+    Request A → [30 contiguous slots]     (20 wasted)
+
+  We would have:
+    Request A → [block 7][block 2][block 15]  (only last block partially filled)
+
+==============================================================================
+  PART 6: The Key Insight
+==============================================================================
+
+  ┌─────────────────────────────────────────────────────────┐
+  │                                                         │
+  │  The KV cache doesn't need contiguous memory.           │
+  │  It needs a page table.                                 │
+  │                                                         │
+  │  This is PagedAttention.                                │
+  │                                                         │
+  └─────────────────────────────────────────────────────────┘
+
+==============================================================================
+  Chapter 9 complete. Next: PagedAttention (ch10)
+==============================================================================
+
+# ============================================================
+# VALIDATION RULES (what the test suite checks):
+# ============================================================
+#
+# 1. SECTION HEADERS
+#    All 6 parts present: "PART 1" through "PART 6"
+#    "Internal Fragmentation" and "External Fragmentation" in titles
+#
+# 2. INTERNAL FRAGMENTATION (Scenario 1)
+#    Must contain "52.2%" (waste percentage)
+#    Must show allocated vs used counts
+#
+# 3. EXTERNAL FRAGMENTATION (Scenario 2)
+#    Must contain "FAILED" or "FAIL" (allocation failure)
+#    Must reference "45" free slots and largest block "15"
+#
+# 4. SCALING WALL (Scenario 3)
+#    Must show "3 requests" or "3" as the fitting count
+#
+# 5. OS ANALOGY (Scenario 4)
+#    Must contain "page" or "Page" (OS concept)
+#    Must contain "block" or "Block" (paged allocation concept)
+#    Must contain "page table" or "block table"
+#
+# 6. VISUALIZATION
+#    Must contain '.' characters (free slot visualization)
+#    Must show ASCII memory grid
+#
+# 7. CLOSING
+#    "Chapter 9 complete"
+#
+# NOTE: Exact formatting is flexible. The test checks for key
+# strings and numbers, not exact layout. Memory visualizations
+# may vary in width and style.

@@ -1,0 +1,190 @@
+# Chapter 16 -- Expected Output Format
+#
+# The demo uses mock data (no model needed), so block IDs and hash values
+# will be deterministic. This spec defines the OUTPUT STRUCTURE that
+# the validation tests check against.
+#
+# Lines starting with # are comments and not part of the output.
+
+=== PART 1: Hash Chaining ===
+
+Block size: 16 tokens
+Prefix: 64 tokens (4 blocks)
+
+Block 0: tokens [100, 101, 102, ..., 115]
+  prev_hash: None
+  block_hash: 0xa3f7c2e1b8d049f5
+
+Block 1: tokens [116, 117, 118, ..., 131]
+  prev_hash: 0xa3f7c2e1b8d049f5  (chained to block 0)
+  block_hash: 0x1b4e9d82c5f30a67
+
+Block 2: tokens [132, 133, 134, ..., 147]
+  prev_hash: 0x1b4e9d82c5f30a67  (chained to block 1)
+  block_hash: 0x7c2a0f63d9e815b4
+
+Block 3: tokens [148, 149, 150, ..., 163]
+  prev_hash: 0x7c2a0f63d9e815b4  (chained to block 2)
+  block_hash: 0xe8d1b574a2c6f039
+
+Hash chaining proof — change token 100 to 999 in block 0:
+  Block 0 hash: 0xa3f7c2e1b8d049f5 -> 0x5f2e8a91d0c743b6  (changed)
+  Block 1 hash: 0x1b4e9d82c5f30a67 -> 0xd4b17a05e8f269c3  (changed — different chain)
+  Block 2 hash: 0x7c2a0f63d9e815b4 -> 0x92c5f3a1b7d60e48  (changed — cascade)
+  Block 3 hash: 0xe8d1b574a2c6f039 -> 0x0a6d3e82f5c9b174  (changed — cascade)
+
+# One token change in block 0 cascades through ALL subsequent block hashes.
+# This prevents false cache hits across different prefix contexts.
+
+=== PART 2: Cache Miss — First Request ===
+
+Request A: 80 tokens (64 prefix + 16 unique)
+  Prefix cache is empty.
+
+  get_computed_blocks:
+    Block 0: hash = 0xa3f7c2e1b8d049f5 -> MISS
+    (stopped — first miss, no further lookups)
+
+  Cache hits: 0
+  Blocks allocated: 5 (fresh from free pool)
+  KV computed for: 80 tokens (full prefill)
+  Free blocks remaining: 5/10
+
+  After prefill — caching full blocks:
+    Cached block 0: hash 0xa3f7c2e1b8d049f5 -> block_id 0
+    Cached block 1: hash 0x1b4e9d82c5f30a67 -> block_id 1
+    Cached block 2: hash 0x7c2a0f63d9e815b4 -> block_id 2
+    Cached block 3: hash 0xe8d1b574a2c6f039 -> block_id 3
+    Cached block 4: hash 0x4f8b21d7a3c965e0 -> block_id 4
+
+  Prefix cache now holds 5 entries.
+
+=== PART 3: Cache Hit — Second Request ===
+
+Request B: 80 tokens (same 64-token prefix + 16 different tokens)
+
+  get_computed_blocks:
+    Block 0: hash = 0xa3f7c2e1b8d049f5 -> HIT (block_id 0, ref_count 1 -> 2)
+    Block 1: hash = 0x1b4e9d82c5f30a67 -> HIT (block_id 1, ref_count 1 -> 2)
+    Block 2: hash = 0x7c2a0f63d9e815b4 -> HIT (block_id 2, ref_count 1 -> 2)
+    Block 3: hash = 0xe8d1b574a2c6f039 -> HIT (block_id 3, ref_count 1 -> 2)
+
+  Cache hits: 4 blocks reused!
+  Computed tokens: 64 (skipped prefill for 4 blocks)
+  New blocks allocated: 1 (for 16 unique tokens)
+  KV computed for: 16 tokens (only the suffix)
+  Free blocks remaining: 4/10
+
+  Prefill savings: 64 tokens skipped (80% of request)
+
+  Block ref_counts after cache hit:
+    Block 0: ref_count = 2 (shared by A and B)
+    Block 1: ref_count = 2
+    Block 2: ref_count = 2
+    Block 3: ref_count = 2
+    Block 4: ref_count = 1 (Request A only)
+    Block 5: ref_count = 1 (Request B only)
+
+=== PART 4: Eviction — Freeing and Reusing ===
+
+Request A finishes:
+  Freeing blocks: [0, 1, 2, 3, 4]
+    Block 0: ref_count 2 -> 1 (still used by B)
+    Block 1: ref_count 2 -> 1
+    Block 2: ref_count 2 -> 1
+    Block 3: ref_count 2 -> 1
+    Block 4: ref_count 1 -> 0 (enters free_queue, stays in cache)
+
+  Free blocks: 5/10 (4 from initial pool + block 4)
+  Free queue: [block 4]
+  Cached entries: 5 (all still in hash table)
+
+Request B finishes:
+  Freeing blocks: [0, 1, 2, 3, 5]
+    Block 0: ref_count 1 -> 0 (enters free_queue)
+    Block 1: ref_count 1 -> 0 (enters free_queue)
+    Block 2: ref_count 1 -> 0 (enters free_queue)
+    Block 3: ref_count 1 -> 0 (enters free_queue)
+    Block 5: ref_count 1 -> 0 (enters free_queue)
+
+  Free queue (LRU order): [block 4, block 0, block 1, block 2, block 3, block 5]
+  All blocks free, but 5 still in cached_blocks!
+
+Request C: same 64-token prefix + 32 new tokens
+  get_computed_blocks:
+    Block 0: hash = 0xa3f7c2e1b8d049f5 -> HIT (ref_count 0 -> 1, removed from free_queue)
+    Block 1: hash = 0x1b4e9d82c5f30a67 -> HIT (ref_count 0 -> 1, removed from free_queue)
+    Block 2: hash = 0x7c2a0f63d9e815b4 -> HIT (ref_count 0 -> 1, removed from free_queue)
+    Block 3: hash = 0xe8d1b574a2c6f039 -> HIT (ref_count 0 -> 1, removed from free_queue)
+
+  Cache hits: 4 (reused from freed-but-cached blocks!)
+  New blocks needed: 2 (for 32 new tokens)
+  Allocated block 6 and block 7 from free pool.
+
+  Eviction not needed — free pool had blocks available.
+
+  If pool were exhausted:
+    evict() -> pop block 4 from free_queue (oldest)
+    Remove hash 0x4f8b21d7a3c965e0 from cached_blocks
+    Block 4 is now truly free for reuse.
+
+=== PART 5: Hit Rate Summary ===
+
+Prefix cache statistics:
+  Total block lookups: 9
+  Cache hits: 8
+  Cache misses: 1
+  Hit rate: 88.9%
+
+  Request A: 0/1 block hits (cache cold)
+  Request B: 4/4 block hits (prefix reused)
+  Request C: 4/4 block hits (freed blocks reused)
+
+  Prefill tokens saved: 128 out of 240 total (53.3%)
+
+Chapter 16 complete. Next: Speculative Decoding (ch17)
+
+# ============================================================
+# VALIDATION RULES (what the test suite checks):
+# ============================================================
+#
+# 1. ALL 5 PARTS PRESENT
+#    Output must contain all 5 section headers (PART 1 through PART 5)
+#    or equivalent section markers.
+#
+# 2. HASH CHAINING
+#    Must show block hash values (hex or decimal).
+#    Must mention "chain" or "chaining" (case-insensitive).
+#    Must show that changing a token changes subsequent hashes.
+#
+# 3. CACHE MISS
+#    Must mention "miss" (case-insensitive).
+#    Must show blocks allocated fresh.
+#
+# 4. CACHE HIT
+#    Must mention "hit" (case-insensitive).
+#    Must show blocks reused/skipped.
+#    Must mention prefill being skipped or computed tokens.
+#
+# 5. EVICTION
+#    Must mention "evict" or "eviction" or "lru" (case-insensitive).
+#    Must show blocks being freed and potentially reused.
+#
+# 6. HIT RATE
+#    Must show a percentage value (e.g., "88.9%" or "53.3%").
+#    Must mention "hit rate" (case-insensitive).
+#
+# 7. REF_COUNT
+#    Must show ref_count values changing (increment/decrement).
+#
+# 8. COMPLETION MARKER
+#    Output must contain "Chapter 16 complete".
+#
+# ============================================================
+# NOTES ON VARIANCE:
+# ============================================================
+#
+# - The demo uses mock data, so block IDs are deterministic.
+# - Exact hash values will vary by hash function choice.
+# - The structure (sections, concepts, flow) must match.
+# - Tests check structure and concepts, not exact numeric values.

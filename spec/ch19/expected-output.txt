@@ -1,0 +1,189 @@
+# Chapter 19 -- Expected Output Format
+#
+# The demo is a pure simulator — no GPU, no model loading needed.
+# All numbers are computed from formulas. This spec defines the
+# OUTPUT STRUCTURE that the validation tests check against.
+#
+# Lines starting with # are comments and not part of the output.
+
+=== PART 1: Tensor Parallelism — Splitting the Work ===
+
+Model: LLaMA-7B-like
+  Hidden dim:  4096
+  Heads:       32
+  Layers:      32
+  Batch size:  1
+  Seq length:  512
+  Precision:   float16 (2 bytes)
+
+Tensor Parallelism: TP = 4 GPUs
+
+Weight splitting:
+  Heads per GPU:      32 / 4 = 8
+  Hidden dim per GPU: 4096 / 4 = 1024
+
+  Column-parallel (QKV projection):
+    Full: W_qkv [4096, 12288]
+    Per GPU: W_qkv [4096, 3072]    // each GPU computes 8 heads of Q, K, V
+
+  Row-parallel (output projection):
+    Full: W_o [4096, 4096]
+    Per GPU: W_o [1024, 4096]       // partial results, need AllReduce
+
+AllReduce communication (ring algorithm):
+  Volume per AllReduce op: 1 * 512 * 4096 * 2 * 2 * (4-1)/4
+                         = 1 * 512 * 4096 * 2 * 1.5
+                         = 6,291,456 bytes (6.0 MB)
+  Ops per layer: 2 (attention + MLP)
+  Volume per layer: 12,582,912 bytes (12.0 MB)
+  Total (32 layers): 402,653,184 bytes (384.0 MB)
+
+# Per-layer AllReduce is the main TP overhead.
+# NVLink (~600 GB/s) handles this in microseconds.
+
+=== PART 2: Pipeline Parallelism — Naive (No Overlap) ===
+
+Config: 4 stages, 8 layers per stage, 2 batches
+
+Timeline (naive — one batch at a time):
+
+  Timestep:  0    1    2    3    4    5    6    7
+  Stage 0:  [B0]  --   --   --  [B1]  --   --   --
+  Stage 1:   --  [B0]  --   --   --  [B1]  --   --
+  Stage 2:   --   --  [B0]  --   --   --  [B1]  --
+  Stage 3:   --   --   --  [B0]  --   --   --  [B1]
+
+  Total timesteps: 8
+  Active slots:    8  (2 batches x 4 stages)
+  Total slots:     32 (4 stages x 8 timesteps)
+  Utilization:     25.0%
+  Bubble fraction: 75.0%
+
+# 3 out of 4 stages idle at every timestep. Terrible utilization.
+# The "pipeline bubble" is the fundamental problem.
+
+=== PART 3: Pipeline Parallelism — With batch_queue ===
+
+Config: 4 stages, 4 micro-batches, overlapped scheduling
+
+Timeline (batch_queue — overlap micro-batches):
+
+  Timestep:  0    1    2    3    4    5    6
+  Stage 0:  [B0] [B1] [B2] [B3]  --   --   --
+  Stage 1:   --  [B0] [B1] [B2] [B3]  --   --
+  Stage 2:   --   --  [B0] [B1] [B2] [B3]  --
+  Stage 3:   --   --   --  [B0] [B1] [B2] [B3]
+
+  Total timesteps: 7  (num_stages + num_batches - 1)
+  Active slots:    16 (4 batches x 4 stages)
+  Total slots:     28 (4 stages x 7 timesteps)
+  Utilization:     57.1%
+  Bubble fraction: 42.9%
+
+Comparison:
+  Naive (2 batches):        25.0% utilization
+  batch_queue (4 batches):  57.1% utilization
+  batch_queue (8 batches):  72.7% utilization
+  batch_queue (16 batches): 84.2% utilization
+  batch_queue (64 batches): 95.5% utilization
+
+# More micro-batches → fewer bubbles. In the limit, utilization → 100%.
+# The tradeoff: more micro-batches = smaller batches = less compute efficiency per batch.
+
+=== PART 4: Combined TP+PP — 8 GPUs ===
+
+Config: TP=4, PP=2, 32 layers, 32 heads, hidden=4096
+
+Total GPUs: 4 * 2 = 8
+
+GPU Layout:
+
+  Stage 0 (layers 0-15):
+    GPU 0: heads  0-7,  hidden    0-1023
+    GPU 1: heads  8-15, hidden 1024-2047
+    GPU 2: heads 16-23, hidden 2048-3071
+    GPU 3: heads 24-31, hidden 3072-4095
+    [AllReduce within stage 0 via NVLink]
+
+  Stage 1 (layers 16-31):
+    GPU 4: heads  0-7,  hidden    0-1023
+    GPU 5: heads  8-15, hidden 1024-2047
+    GPU 6: heads 16-23, hidden 2048-3071
+    GPU 7: heads 24-31, hidden 3072-4095
+    [AllReduce within stage 1 via NVLink]
+
+  Hidden state transfer: Stage 0 → Stage 1 via InfiniBand
+    Volume: 1 * 512 * 4096 * 2 = 4,194,304 bytes (4.0 MB)
+
+Communication:
+  TP (intra-stage): AllReduce, high bandwidth (NVLink ~600 GB/s)
+  PP (inter-stage):  Send/recv, lower bandwidth (InfiniBand ~50 GB/s)
+
+# TP within the node where bandwidth is high.
+# PP across nodes where only point-to-point transfers are needed.
+
+=== PART 5: Scaling Guide ===
+
+Recommended parallelism by model size and GPU count:
+
+  Model   | Weights  | 1 GPU (80GB) | 2 GPUs  | 4 GPUs      | 8 GPUs
+  --------|----------|-------------|---------|-------------|-------------
+  7B      | ~14 GB   | TP=1        | TP=2    | TP=4        | TP=4, PP=2
+  13B     | ~26 GB   | TP=1 (tight)| TP=2    | TP=4        | TP=4, PP=2
+  70B     | ~140 GB  | --          | --      | TP=4 (tight)| TP=4, PP=2
+
+  Communication overhead estimates (batch=1, seq=512, fp16):
+    TP=2: ~192 MB total AllReduce per forward pass
+    TP=4: ~384 MB total AllReduce per forward pass
+    TP=8: ~512 MB total AllReduce per forward pass (diminishing returns)
+
+  Rules of thumb:
+    - TP first (within node), PP second (across nodes)
+    - TP=8 rarely worth it — AllReduce overhead grows
+    - PP adds latency (pipeline bubbles) but saves bandwidth
+    - batch_queue essential for PP utilization
+
+# For most deployments: TP=2 or TP=4 within a node handles up to ~30B.
+# Beyond that, add PP across nodes.
+
+Chapter 19 complete. Next: Where to Go From Here (ch20)
+
+# ============================================================
+# VALIDATION RULES (what the test suite checks):
+# ============================================================
+#
+# 1. ALL 5 PARTS PRESENT
+#    Output must contain all 5 section headers (PART 1 through PART 5)
+#    or equivalent section markers.
+#
+# 2. TENSOR PARALLELISM
+#    Must mention "tensor parallelism" or "TP" (case-insensitive).
+#    Must mention "allreduce" or "all-reduce" (case-insensitive).
+#    Must show communication volume numbers.
+#
+# 3. PIPELINE PARALLELISM
+#    Must mention "pipeline" (case-insensitive).
+#    Must mention "bubble" or "utilization" (case-insensitive).
+#    Must show a timeline or schedule.
+#
+# 4. BATCH_QUEUE
+#    Must mention "batch_queue" or "micro-batch" or "overlap" (case-insensitive).
+#    Must show improved utilization compared to naive.
+#
+# 5. COMBINED TP+PP
+#    Must show TP and PP combined.
+#    Must show total GPU count.
+#
+# 6. COMPLETION MARKER
+#    Output must contain "Chapter 19 complete".
+#
+# ============================================================
+# NOTES ON VARIANCE:
+# ============================================================
+#
+# - This is a simulator — all numbers are deterministic.
+# - Exact formatting may vary (tables, ASCII art, etc.).
+# - Communication volumes may differ slightly based on
+#   bytes_per_element (fp16 vs fp32) — tests check for presence
+#   of numbers, not exact values.
+# - Timeline visualization may use different characters.

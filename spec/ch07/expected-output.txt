@@ -1,0 +1,78 @@
+# Chapter 7 -- Expected Output Format
+#
+# The exact generated text and timing numbers will vary by implementation,
+# hardware, and library. This spec defines the OUTPUT STRUCTURE that the
+# validation tests check against.
+#
+# Lines starting with # are comments and not part of the output.
+
+Loading model: openai-community/gpt2
+  Model files downloaded/cached
+  Tokenizer loaded (vocab_size: 50257)
+  Model weights loaded (12 layers, 768 dim, 12 heads)
+
+Prompt: "The future of artificial intelligence is"
+Prompt tokens: 6
+Generating up to 200 tokens...
+
+--- Generated Text ---
+The future of artificial intelligence is [... continuation text ...]
+--- End ---
+
+--- Stats ---
+Tokens generated: N
+Time: X.XXs
+Speed: X.XX tokens/sec
+
+# ============================================================
+# VALIDATION RULES (what the test suite checks):
+# ============================================================
+#
+# 1. LOADING INDICATOR
+#    Output must contain at least one of:
+#      - "Loading model" or "loading model"
+#      - "Model" and "loaded" on same line
+#      - "Downloaded" or "cached"
+#      - "safetensors"
+#    This confirms the model loading phase ran.
+#
+# 2. TOKENIZER
+#    Output must mention "tokenizer" or "vocab".
+#
+# 3. GENERATED TEXT SECTION
+#    Output must contain a clearly delimited generated text section.
+#    Look for: "Generated Text" (case-insensitive) in the output.
+#    The text between the delimiters must be non-empty.
+#
+# 4. COHERENCE (basic)
+#    The generated text must contain at least 20 whitespace-separated words.
+#
+# 5. NO DEGENERATE REPETITION
+#    No single word should appear 10+ times consecutively.
+#
+# 6. PROMPT ECHO
+#    The prompt or a substring must appear in the output.
+#
+# 7. NO NaN
+#    No NaN, Inf in generated text section.
+#
+# 8. SPEED STAT
+#    Output must report generation speed.
+#
+# 9. TOKEN COUNT
+#    Output must report how many tokens were generated.
+#
+# 10. TIMING
+#     Output must report wall-clock time.
+#
+# 11. EXIT 0
+#     Process exits with code 0.
+#
+# ============================================================
+# NOTES ON VARIANCE:
+# ============================================================
+#
+# - Greedy decoding (argmax) is deterministic for a given model+prompt.
+# - Timing varies by hardware (CPU vs GPU, Metal vs CUDA).
+# - The exact formatting (delimiters, spacing, labels) may differ.
+# - Tests use flexible pattern matching, not exact string comparison.

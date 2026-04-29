@@ -1,0 +1,67 @@
+# Chapter 6 -- Expected Output Format
+#
+# The exact predictions and logit values are deterministic for a given model
+# but may vary slightly by framework (float precision).
+#
+# Lines starting with # are comments and not part of the output.
+
+Loading model: openai-community/gpt2
+  Model files downloaded/cached
+  Tokenizer loaded (vocab_size: 50257)
+  Model config: 12 layers, 768 dim, 12 heads
+
+Weights loaded: 148 tensors, ~124M parameters
+  Token embedding: [50257, 768]
+  Position embedding: [1024, 768]
+
+Full model assembled: 12 transformer blocks + final LayerNorm + LM head (weight-tied)
+
+--- Forward Pass: "What is AI?" ---
+  Input tokens: N
+  Logits shape: [1, N, 50257]
+
+Top-5 next token predictions for "What is AI?":
+  1. "token"    (logit: XX.XX)
+  2. "token"    (logit: XX.XX)
+  3. "token"    (logit: XX.XX)
+  4. "token"    (logit: XX.XX)
+  5. "token"    (logit: XX.XX)
+--- End ---
+
+# ============================================================
+# VALIDATION RULES (what the test suite checks):
+# ============================================================
+#
+# 1. MODEL LOADED
+#    Output must indicate the full model is assembled/loaded.
+#    Look for: "model" and ("assembled" or "loaded" or "ready" or "built")
+#
+# 2. LOGITS SHAPE
+#    Output must mention 50257 in context of logits or predictions.
+#    This confirms the LM head projection is working.
+#
+# 3. TOP PREDICTIONS EXIST
+#    Output must contain numbered predictions (at least "1." through "5.").
+#    Look for pattern: digit + period + space + quoted token.
+#
+# 4. PREDICTIONS PLAUSIBLE
+#    At least one of the top-5 tokens should be recognizable.
+#    Common GPT-2 continuations after "What is AI?" include tokens like
+#    "The", "It", "A", "\n", "What", "In", etc.
+#
+# 5. NO NaN
+#    No NaN, Inf, or -Inf in logit values or predictions.
+#
+# 6. RUNNING EXAMPLE
+#    "What is AI?" must appear in the output.
+#
+# 7. EXIT 0
+#    Process exits with code 0.
+#
+# ============================================================
+# NOTES:
+# ============================================================
+#
+# - Top-5 predictions are deterministic for a given model + tokenizer.
+# - Logit values may differ slightly by framework but ordering should match.
+# - The exact token text representation may vary (e.g., " The" vs "The").

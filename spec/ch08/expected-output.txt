@@ -1,0 +1,85 @@
+# Chapter 8 -- Expected Output Format
+#
+# This chapter adds timing breakdown, KV cache memory, and polished output
+# on top of Chapter 7's generation.
+#
+# Lines starting with # are comments and not part of the output.
+
+# === generate subcommand ===
+
+Loading model: openai-community/gpt2
+  Tokenizer loaded (vocab_size: 50257)
+  Model loaded (12 layers, 768 dim, 12 heads, ~124M params)
+
+Prompt: "The future of artificial intelligence is"
+Prompt tokens: 6
+Generating up to 200 tokens...
+
+--- Generated Text ---
+The future of artificial intelligence is [... continuation text ...]
+--- End ---
+
+--- Stats ---
+Tokens generated: N
+Prefill: X.XXs (6 prompt tokens)
+Decode:  X.XXs (N tokens, X.XX tokens/sec)
+Total:   X.XXs
+KV cache: X.X MB (N positions × 12 layers × 6 KB/pos/layer)
+
+# === inspect subcommand ===
+
+=== Model: openai-community/gpt2 ===
+
+Config:
+  Layers: 12, Hidden dim: 768, Heads: 12, Vocab: 50257
+  Context window: 1024, Head dim: 64
+
+Weights:
+  148 tensors, ~124M parameters
+  Memory: ~497 MB (float32)
+
+Layers:
+  2 embeddings, 24 LayerNorms, 12 MLPs, 12 attention blocks
+
+Tokenizer:
+  "What is AI?" → [token_ids] → "What is AI?" ✓
+
+Quick prediction (forward pass on "What is AI?"):
+  1. "token"  (logit: XX.XX)
+  2. "token"  (logit: XX.XX)
+  3. "token"  (logit: XX.XX)
+  4. "token"  (logit: XX.XX)
+  5. "token"  (logit: XX.XX)
+
+# ============================================================
+# VALIDATION RULES (what the test suite checks):
+# ============================================================
+#
+# Tests run BOTH subcommands: generate and inspect.
+#
+# FOR generate:
+#
+# 1. All Chapter 7 tests still pass (loading, text, stats)
+# 2. PREFILL TIMING
+#    Output must contain "prefill" and a time value on the same line.
+# 3. DECODE TIMING
+#    Output must contain "decode" and a time value on the same line.
+# 4. KV CACHE MENTION
+#    Output must mention "KV cache" or "kv cache" with a size.
+#
+# FOR inspect:
+#
+# 5. INSPECT WORKS
+#    inspect subcommand runs and mentions model name and config.
+# 6. PARAM COUNT
+#    Output mentions parameter count (124M or similar).
+# 7. MEMORY ESTIMATE
+#    Output mentions memory in MB or GB.
+#
+# ============================================================
+# NOTES:
+# ============================================================
+#
+# - Chapter 8 is additive — all ch07 tests should still pass.
+# - The inspect output format is flexible; tests check for key phrases.
+# - Timing values vary by hardware.

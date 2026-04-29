@@ -1,0 +1,202 @@
+# Chapter 18 -- Expected Output Format
+#
+# The demo uses mock logits and a small vocabulary (no model needed),
+# so output values are deterministic. This spec defines the OUTPUT
+# STRUCTURE that the validation tests check against.
+#
+# Lines starting with # are comments and not part of the output.
+
+=== PART 1: The Problem ===
+
+LLMs generate free-form text. Ask for "a number between 1 and 100" and you
+might get "forty two" instead of "42". There's no structural guarantee.
+
+Mock vocabulary (13 tokens):
+  Token 0:  "4"       (digit)
+  Token 1:  "2"       (digit)
+  Token 2:  "42"      (multi-digit)
+  Token 3:  "seven"   (word)
+  Token 4:  "hello"   (word)
+  Token 5:  "0"       (digit)
+  Token 6:  "9"       (digit)
+  Token 7:  " "       (space)
+  Token 8:  "abc"     (letters)
+  Token 9:  "forty"   (word)
+  Token 10: "two"     (word)
+  Token 11: "."       (punctuation)
+  Token 12: "xyz"     (letters)
+
+Mock logits (favoring word tokens):
+  Token 0  ("4"):     logit = 1.0
+  Token 1  ("2"):     logit = 1.2
+  Token 2  ("42"):    logit = 2.0
+  Token 3  ("seven"): logit = 3.0
+  Token 4  ("hello"): logit = 2.5
+  Token 5  ("0"):     logit = 0.5
+  Token 6  ("9"):     logit = 0.8
+  Token 7  (" "):     logit = 1.5
+  Token 8  ("abc"):   logit = 1.8
+  Token 9  ("forty"): logit = 5.0    <-- highest logit
+  Token 10 ("two"):   logit = 4.0    <-- second highest
+  Token 11 ("."):     logit = 0.3
+  Token 12 ("xyz"):   logit = 1.0
+
+Unconstrained greedy: picks Token 9 ("forty") — not a number!
+The model prefers words, but we need digits.
+
+=== PART 2: FSM Construction ===
+
+Pattern: [0-9]+
+Compiling to finite state machine...
+
+States:
+  State 0: initial (not accepting)
+  State 1: accepting
+
+Transitions:
+  (State 0, '0') -> State 1
+  (State 0, '1') -> State 1
+  (State 0, '2') -> State 1
+  ...
+  (State 0, '9') -> State 1
+  (State 1, '0') -> State 1
+  (State 1, '1') -> State 1
+  (State 1, '2') -> State 1
+  ...
+  (State 1, '9') -> State 1
+
+# 20 transitions total: 10 digits x 2 states
+
+Token validity from State 0:
+  Token 0  ("4"):     VALID   (0 -> 1 via '4')
+  Token 1  ("2"):     VALID   (0 -> 1 via '2')
+  Token 2  ("42"):    VALID   (0 -> 1 via '4', 1 -> 1 via '2')
+  Token 3  ("seven"): INVALID (no transition for 's')
+  Token 4  ("hello"): INVALID (no transition for 'h')
+  Token 5  ("0"):     VALID   (0 -> 1 via '0')
+  Token 6  ("9"):     VALID   (0 -> 1 via '9')
+  Token 7  (" "):     INVALID (no transition for ' ')
+  Token 8  ("abc"):   INVALID (no transition for 'a')
+  Token 9  ("forty"): INVALID (no transition for 'f')
+  Token 10 ("two"):   INVALID (no transition for 't')
+  Token 11 ("."):     INVALID (no transition for '.')
+  Token 12 ("xyz"):   INVALID (no transition for 'x')
+
+Valid tokens: 5 out of 13
+
+=== PART 3: Unconstrained vs Constrained ===
+
+--- Unconstrained (no grammar constraint) ---
+Logits: [1.0, 1.2, 2.0, 3.0, 2.5, 0.5, 0.8, 1.5, 1.8, 5.0, 4.0, 0.3, 1.0]
+Greedy pick: Token 9 ("forty") — logit = 5.0
+Output: "forty"
+
+--- Constrained with [0-9]+ ---
+Logits before mask: [1.0, 1.2, 2.0, 3.0, 2.5, 0.5, 0.8, 1.5, 1.8, 5.0, 4.0, 0.3, 1.0]
+Logits after mask:  [1.0, 1.2, 2.0, -inf, -inf, 0.5, 0.8, -inf, -inf, -inf, -inf, -inf, -inf]
+Greedy pick: Token 2 ("42") — logit = 2.0 (highest among valid tokens)
+Output: "42"
+
+Same model preferences. Same logits. Different output.
+The grammar constraint forces valid structure without changing the model.
+
+=== PART 4: Token Masking ===
+
+FSM State: 0 (initial)
+Pattern: [0-9]+
+
+Before masking:
+  Token 0  ("4"):     logit =  1.0   valid=true
+  Token 1  ("2"):     logit =  1.2   valid=true
+  Token 2  ("42"):    logit =  2.0   valid=true
+  Token 3  ("seven"): logit =  3.0   valid=false
+  Token 4  ("hello"): logit =  2.5   valid=false
+  Token 5  ("0"):     logit =  0.5   valid=true
+  Token 6  ("9"):     logit =  0.8   valid=true
+  Token 7  (" "):     logit =  1.5   valid=false
+  Token 8  ("abc"):   logit =  1.8   valid=false
+  Token 9  ("forty"): logit =  5.0   valid=false
+  Token 10 ("two"):   logit =  4.0   valid=false
+  Token 11 ("."):     logit =  0.3   valid=false
+  Token 12 ("xyz"):   logit =  1.0   valid=false
+
+After masking (invalid -> -infinity):
+  Token 0  ("4"):     logit =  1.0
+  Token 1  ("2"):     logit =  1.2
+  Token 2  ("42"):    logit =  2.0   <-- highest surviving logit
+  Token 3  ("seven"): logit = -inf   (masked)
+  Token 4  ("hello"): logit = -inf   (masked)
+  Token 5  ("0"):     logit =  0.5
+  Token 6  ("9"):     logit =  0.8
+  Token 7  (" "):     logit = -inf   (masked)
+  Token 8  ("abc"):   logit = -inf   (masked)
+  Token 9  ("forty"): logit = -inf   (masked)
+  Token 10 ("two"):   logit = -inf   (masked)
+  Token 11 ("."):     logit = -inf   (masked)
+  Token 12 ("xyz"):   logit = -inf   (masked)
+
+8 tokens masked, 5 tokens survive.
+
+=== PART 5: Pipeline Integration ===
+
+GrammarConstraint implements LogitsProcessor (from ch14).
+It plugs into PipelineSampler like any other processor.
+
+Pipeline with grammar constraint:
+  1. GrammarConstraint([0-9]+)   <-- mask invalid tokens
+  2. TemperatureProcessor(0.8)   <-- scale remaining logits
+  3. TopKProcessor(3)            <-- keep top 3 valid tokens
+
+Multi-step constrained generation:
+  Step 1: FSM state=0, valid tokens=[4, 2, 42, 0, 9]
+          After pipeline: sample Token 2 ("42")
+          Advance FSM: state 0 -> 1 (via '4' then '2')
+  Step 2: FSM state=1, valid tokens=[4, 2, 42, 0, 9]
+          (State 1 has same digit transitions — still in [0-9]+ loop)
+          After pipeline: sample Token 6 ("9")
+          Advance FSM: state 1 -> 1 (via '9')
+  Step 3: FSM state=1, accept=true
+          Generation can stop (FSM is in accept state)
+
+Result: "429" — guaranteed to match [0-9]+
+
+The GrammarConstraint is just another LogitsProcessor.
+No changes to PipelineSampler needed.
+
+Chapter 18 complete. Next: Parallelism (ch19)
+
+# ============================================================
+# VALIDATION RULES (what the test suite checks):
+# ============================================================
+#
+# 1. ALL 5 PARTS PRESENT
+#    Output must contain all 5 section headers (PART 1 through PART 5)
+#    or equivalent section markers.
+#
+# 2. FSM / STATE MACHINE
+#    Must mention "fsm", "state machine", or "finite state"
+#    (case-insensitive).
+#
+# 3. CONSTRAINED OUTPUT
+#    Must mention "constrained" or "mask" (case-insensitive).
+#    Must show tokens being filtered (e.g., -inf, "masked", "invalid").
+#
+# 4. UNCONSTRAINED COMPARISON
+#    Must show unconstrained output for comparison
+#    (e.g., "unconstrained", "without constraint").
+#
+# 5. PIPELINE INTEGRATION
+#    Must mention "logitsprocessor" or "pipeline" (case-insensitive).
+#    Must show GrammarConstraint used as a processor.
+#
+# 6. COMPLETION MARKER
+#    Output must contain "Chapter 18 complete".
+#
+# ============================================================
+# NOTES ON VARIANCE:
+# ============================================================
+#
+# - The demo uses mock logits, so values are deterministic.
+# - The exact token names/indices may vary.
+# - Tests check structure and concepts, not exact numeric values.
+# - Multi-step generation results depend on implementation choices.

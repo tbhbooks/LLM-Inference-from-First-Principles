@@ -1,0 +1,138 @@
+# Chapter 15 -- Expected Output Format
+#
+# The demo simulates the API lifecycle in-process (no real HTTP server,
+# no real model). All responses are mock data, so output is deterministic.
+# This spec defines the OUTPUT STRUCTURE that the validation tests check
+# against.
+#
+# Lines starting with # are comments and not part of the output.
+
+=== PART 1: Server Startup ===
+
+Starting rvllm server on http://127.0.0.1:8080
+Model: mock-gpt2
+Endpoints:
+  POST /v1/completions
+  POST /v1/chat/completions
+  GET  /v1/models
+  GET  /health
+
+=== PART 2: Health Check ===
+
+GET /health → 200 OK
+{"status": "ok"}
+
+=== PART 3: Completion Request ===
+
+POST /v1/completions
+Request: {"model": "mock-gpt2", "prompt": "The future of AI is", "max_tokens": 5, "stream": false}
+
+Response:
+{
+  "id": "cmpl-abc123",
+  "object": "text_completion",
+  "created": 1234567890,
+  "model": "mock-gpt2",
+  "choices": [
+    {
+      "text": " bright and full of promise",
+      "index": 0,
+      "finish_reason": "length"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 5,
+    "completion_tokens": 5,
+    "total_tokens": 10
+  }
+}
+
+=== PART 4: Streaming Response ===
+
+POST /v1/completions (stream=true)
+
+data: {"id":"cmpl-abc123","object":"text_completion","created":1234567890,"choices":[{"text":" bright","index":0,"finish_reason":null}]}
+
+data: {"id":"cmpl-abc123","object":"text_completion","created":1234567890,"choices":[{"text":" and","index":0,"finish_reason":null}]}
+
+data: {"id":"cmpl-abc123","object":"text_completion","created":1234567890,"choices":[{"text":" full","index":0,"finish_reason":null}]}
+
+data: {"id":"cmpl-abc123","object":"text_completion","created":1234567890,"choices":[{"text":" of","index":0,"finish_reason":null}]}
+
+data: {"id":"cmpl-abc123","object":"text_completion","created":1234567890,"choices":[{"text":" promise","index":0,"finish_reason":"length"}]}
+
+data: [DONE]
+
+=== PART 5: Error Handling ===
+
+POST /v1/completions (missing prompt)
+→ 400 Bad Request
+
+{
+  "error": {
+    "message": "prompt is required",
+    "type": "invalid_request_error",
+    "code": null
+  }
+}
+
+POST /v1/completions (invalid temperature)
+→ 400 Bad Request
+
+{
+  "error": {
+    "message": "temperature must be non-negative",
+    "type": "invalid_request_error",
+    "code": null
+  }
+}
+
+Chapter 15 complete. Next: Prefix Caching (ch16)
+
+# ============================================================
+# VALIDATION RULES (what the test suite checks):
+# ============================================================
+#
+# 1. ALL 5 PARTS PRESENT
+#    Output must contain all 5 section headers (PART 1 through PART 5)
+#    or equivalent section markers.
+#
+# 2. SERVER STARTUP
+#    Must show a listen address (host:port).
+#    Must list the API endpoints.
+#
+# 3. HEALTH CHECK
+#    Must show /health endpoint.
+#    Must show {"status": "ok"} or equivalent.
+#
+# 4. COMPLETION REQUEST
+#    Must show a request/response pair.
+#    Response must include OpenAI fields: id, object, choices, usage.
+#
+# 5. SSE STREAMING
+#    Must show "data: " prefix on streaming events.
+#    Must show "[DONE]" sentinel.
+#    Must show individual tokens being streamed.
+#
+# 6. ERROR HANDLING
+#    Must show an error response.
+#    Must include "error" object with "message" and "type" fields.
+#    Must mention "invalid_request_error" or similar type.
+#
+# 7. OPENAI FORMAT
+#    Output must contain "text_completion" or "chat.completion"
+#    as the object type.
+#    Must contain "finish_reason" in at least one response.
+#
+# 8. COMPLETION MARKER
+#    Output must contain "Chapter 15 complete".
+#
+# ============================================================
+# NOTES ON VARIANCE:
+# ============================================================
+#
+# - The demo uses mock data, so all output is deterministic.
+# - The exact completion id, timestamp, and generated text may vary.
+# - Tests check structure and format, not exact content values.
+# - The number of streaming tokens may vary as long as the SSE
+#   format is correct and [DONE] is present.

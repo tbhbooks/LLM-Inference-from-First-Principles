@@ -1,0 +1,85 @@
+
+==============================================================================
+  PART 1: KV Cache Memory — Where Does It All Go?
+==============================================================================
+
+  Every transformer layer stores a Key and Value vector for every token
+  in the sequence. This is the KV cache. Let's see how it scales.
+
+  Model              Layers    Heads  HeadDim      Per Token  Per Tok/Layer
+  ------------------------------------------------------------------------
+  GPT-2 (124M)           12       12       64       36.00 KB        3.00 KB
+  LLaMA-7B               32       32      128      512.00 KB       16.00 KB
+  LLaMA-70B              80       64      128        2.50 MB       32.00 KB
+
+==============================================================================
+  PART 2: KV Cache vs Sequence Length
+==============================================================================
+
+  The KV cache grows linearly with sequence length.
+  Here's what a single sequence costs:
+
+  Model                 1024 tokens      4096 tokens
+  --------------------------------------------------
+  GPT-2 (124M)             36.00 MB        144.00 MB
+  LLaMA-7B                512.00 MB          2.00 GB
+  LLaMA-70B                 2.50 GB         10.00 GB
+
+==============================================================================
+  PART 3: The Concurrency Ceiling (10 GB GPU Memory)
+==============================================================================
+
+  Given 10.00 GB of free GPU memory for KV cache,
+  how many concurrent requests can we serve?
+
+  Model                 Max @ 1024 tokens      Max @ 4096 tokens
+  --------------------------------------------------------------
+  GPT-2 (124M)                    284 seq                 71 seq
+  LLaMA-7B                         20 seq                  5 seq
+  LLaMA-70B                         4 seq                  1 seq
+
+  --> Notice: LLaMA-70B can barely fit a handful of long sequences!
+      This is the fundamental problem vLLM exists to solve.
+
+==============================================================================
+  PART 4: The Memory Wall — Scaling Concurrent Requests
+==============================================================================
+
+  What happens as we try to serve more concurrent requests?
+  (Each request = 1024-token sequence, 10 GB available)
+
+  Model                 1req      2req      4req      8req     16req     32req
+  ------------------------------------------------------------------------
+  GPT-2 (124M)         0.0GB     0.1GB     0.1GB     0.3GB     0.6GB     1.1GB
+  LLaMA-7B             0.5GB     1.0GB     2.0GB     4.0GB     8.0GB     OOM!!
+  LLaMA-70B            2.5GB     5.0GB    10.0GB     OOM!!     OOM!!     OOM!!
+
+  OOM!! = Out of memory. The request cannot be served.
+
+==============================================================================
+  PART 5: Prefill vs Decode — Two Very Different Phases
+==============================================================================
+
+
+  PREFILL (processing the prompt)
+  ────────────────────────────────
+  - All prompt tokens processed IN PARALLEL
+  - Large matrix multiply — GPU compute fully utilized
+  - Bottleneck: COMPUTE (FLOPS)
+
+  DECODE (generating one token at a time)
+  ────────────────────────────────────────
+  - Input is just 1 token
+  - Must READ the entire KV cache for attention
+  - Tiny compute, massive memory reads
+  - Bottleneck: MEMORY BANDWIDTH
+
+  ┌──────────────────────────────────────────────────────────────────┐
+  │  Prefill is compute-bound  →  GPU cores are the bottleneck      │
+  │  Decode is memory-bound    →  Memory bandwidth is the bottleneck│
+  │  LLM serving is fundamentally a MEMORY problem.                 │
+  └──────────────────────────────────────────────────────────────────┘
+
+==============================================================================
+  Chapter 1 complete. Next: vLLM architecture overview (ch02)
+==============================================================================

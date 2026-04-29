@@ -1,0 +1,59 @@
+# Chapter 4 -- Expected Output Format
+#
+# This chapter loads and inspects GPT-2 — no forward pass, no generation.
+# The exact weight listing format may vary, but key information must appear.
+#
+# Lines starting with # are comments and not part of the output.
+
+Loading model: openai-community/gpt2
+  Model files downloaded/cached
+  Tokenizer loaded (vocab_size: 50257)
+  Model config: 12 layers, 768 dim, 12 heads
+
+Weights: 148 tensors, ~124M parameters
+  transformer.wte.weight: [50257, 768]
+  transformer.wpe.weight: [1024, 768]
+  [... weight listing or summary ...]
+  transformer.ln_f.weight: [768]
+  transformer.ln_f.bias: [768]
+
+Tokenizer check:
+  "What is AI?" → [2061, 318, 9552, 30] → "What is AI?" ✓
+
+# ============================================================
+# VALIDATION RULES (what the test suite checks):
+# ============================================================
+#
+# 1. LOADING INDICATOR
+#    Output must contain at least one of:
+#      - "Loading model" or "loading model"
+#      - "Model" and "loaded" on same line
+#      - "Downloaded" or "cached"
+#      - "safetensors"
+#    This confirms the model loading phase ran.
+#
+# 2. TOKENIZER
+#    Output must mention "tokenizer" or "vocab".
+#
+# 3. MODEL DIMENSIONS
+#    Output must contain "768" (hidden dim) and "12" (layers or heads).
+#
+# 4. WEIGHT COUNT
+#    Output must mention "148" or a weight count.
+#
+# 5. PARAMETER COUNT
+#    Output must mention "124" (as in ~124M parameters).
+#
+# 6. TOKENIZER ROUND-TRIP
+#    "What is AI?" must appear in the output (in the tokenizer check section).
+#
+# 7. EXIT 0
+#    Process exits with code 0.
+#
+# ============================================================
+# NOTES ON VARIANCE:
+# ============================================================
+#
+# - The weight listing format is flexible (full list, summary, or sample).
+# - Token IDs for "What is AI?" are deterministic: [2061, 318, 9552, 30].
+# - Tests use flexible pattern matching, not exact string comparison.

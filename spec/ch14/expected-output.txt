@@ -1,0 +1,178 @@
+# Chapter 14 -- Expected Output Format
+#
+# The demo uses mock logits (no model needed), so probability values
+# will be deterministic. This spec defines the OUTPUT STRUCTURE that
+# the validation tests check against.
+#
+# Lines starting with # are comments and not part of the output.
+
+=== PART 1: Beyond Argmax ===
+
+Raw logits (10 tokens):
+  Token 0: logit = 5.0
+  Token 1: logit = 3.0
+  Token 2: logit = 2.0
+  Token 3: logit = 1.5
+  Token 4: logit = 1.0
+  Token 5: logit = 0.5
+  Token 6: logit = 0.0
+  Token 7: logit = -0.5
+  Token 8: logit = -1.0
+  Token 9: logit = -2.0
+
+After softmax:
+  Token 0: prob = 0.7054    <-- greedy always picks this
+  Token 1: prob = 0.0954
+  Token 2: prob = 0.0351
+  Token 3: prob = 0.0213
+  Token 4: prob = 0.0129
+  Token 5: prob = 0.0078
+  Token 6: prob = 0.0048
+  Token 7: prob = 0.0029
+  Token 8: prob = 0.0018
+  Token 9: prob = 0.0006
+
+Greedy picks Token 0 every time. Always. No variety, no creativity.
+
+=== PART 2: Temperature — Controlling Confidence ===
+
+Temperature = 0.5 (sharpened):
+  Token 0: prob = 0.9362    <-- even more confident
+  Token 1: prob = 0.0381
+  ...
+
+Temperature = 1.0 (baseline):
+  [same as raw softmax above]
+
+Temperature = 2.0 (flattened):
+  Token 0: prob = 0.3363    <-- much less confident
+  Token 1: prob = 0.1837
+  Token 2: prob = 0.1240
+  ...
+
+# Probabilities shift: lower temperature → top token dominates.
+# Higher temperature → distribution flattens, more diversity.
+
+=== PART 3: Top-K and Top-P — Trimming the Tail ===
+
+Top-K (k=3):
+  Token 0: prob = 0.8446    <-- renormalized among top 3
+  Token 1: prob = 0.1143
+  Token 2: prob = 0.0421
+  Token 3..9: prob = 0.0000  (filtered out)
+
+Top-P (p=0.9, nucleus):
+  [Only tokens whose cumulative probability reaches 0.9 survive]
+  Token 0: prob = 0.8353    <-- cumsum = 0.7054 (keep)
+  Token 1: prob = 0.1131    <-- cumsum = 0.8008 (keep)
+  Token 2: prob = 0.0416    <-- cumsum = 0.8359 (keep)
+  Token 3: prob = 0.0100    <-- cumsum = 0.8572 ... depends on threshold
+  ...
+  [tokens after cumsum >= 0.9 are filtered to 0.0000]
+
+# Top-K is a fixed window. Top-P adapts: when the model is confident,
+# fewer tokens survive; when uncertain, more survive.
+
+=== PART 4: Repetition Penalty — Stop Saying the Same Thing ===
+
+Previously generated tokens: [0, 1, 0, 3]  (Token 0 and 1 and 3 are seen)
+
+Before penalty:
+  Token 0: logit = 5.0, prob = 0.7054
+  Token 1: logit = 3.0, prob = 0.0954
+
+After penalty (penalty=1.2):
+  Token 0: logit = 4.1667, prob = 0.5241  (reduced — was 0.7054)
+  Token 1: logit = 2.5000, prob = 0.0990  (reduced relative to others)
+  Token 3: logit = 1.2500, prob = 0.0284  (reduced)
+  Token 2: logit = 2.0, prob = 0.0602     (unchanged — not seen)
+
+# Seen tokens get penalized. Unseen tokens gain relative probability.
+
+=== PART 5: The Pipeline — Composing Strategies ===
+
+SamplingParams: temperature=0.8, top_k=5, top_p=0.9, repetition_penalty=1.2
+Previously generated: [0, 1, 0, 3]
+
+Stage 0 — Raw logits:
+  [5.0, 3.0, 2.0, 1.5, 1.0, 0.5, 0.0, -0.5, -1.0, -2.0]
+
+Stage 1 — After RepetitionPenalty(1.2):
+  [4.167, 2.500, 2.0, 1.250, 1.0, 0.5, 0.0, -0.5, -1.0, -2.0]
+
+Stage 2 — After Temperature(0.8):
+  [5.208, 3.125, 2.5, 1.563, 1.25, 0.625, 0.0, -0.625, -1.25, -2.5]
+
+Stage 3 — After TopK(5):
+  [5.208, 3.125, 2.5, 1.563, 1.25, -inf, -inf, -inf, -inf, -inf]
+
+Stage 4 — After TopP(0.9):
+  [logits with some additional filtering]
+
+Final: softmax → sample from distribution
+
+# Each stage transforms the logits. The pipeline is the composition.
+
+=== PART 6: SamplingParams — The User's Control Panel ===
+
+Preset: Greedy
+  SamplingParams(temperature=0.0)
+  → No processors, argmax selection
+
+Preset: Creative
+  SamplingParams(temperature=0.9, top_k=50, top_p=0.95)
+  → [Temperature, TopK, TopP] pipeline, multinomial sampling
+
+Preset: Focused
+  SamplingParams(temperature=0.3, top_k=10, repetition_penalty=1.1)
+  → [RepetitionPenalty, Temperature, TopK] pipeline, multinomial sampling
+
+Preset: Nucleus Only
+  SamplingParams(temperature=1.0, top_p=0.9)
+  → [TopP] pipeline, multinomial sampling
+
+Chapter 14 complete. Next: Building the API Server (ch15)
+
+# ============================================================
+# VALIDATION RULES (what the test suite checks):
+# ============================================================
+#
+# 1. ALL 6 PARTS PRESENT
+#    Output must contain all 6 section headers (PART 1 through PART 6)
+#    or equivalent section markers.
+#
+# 2. TEMPERATURE
+#    Must show probability values for different temperatures.
+#    Must mention "temperature" (case-insensitive).
+#
+# 3. TOP-K
+#    Must mention "top-k" or "top_k" (case-insensitive).
+#    Must show tokens being filtered (prob = 0 or -inf).
+#
+# 4. TOP-P / NUCLEUS
+#    Must mention "top-p", "top_p", or "nucleus" (case-insensitive).
+#    Must mention cumulative probability.
+#
+# 5. REPETITION PENALTY
+#    Must mention "repetition" (case-insensitive).
+#    Must show before/after penalty values.
+#
+# 6. PIPELINE / PROCESSOR
+#    Must mention "pipeline" or "processor" (case-insensitive).
+#    Must show stages applied in sequence.
+#
+# 7. PROBABILITY VALUES
+#    Output must contain decimal numbers between 0 and 1
+#    representing probabilities (e.g., "0.7054", "0.0954").
+#
+# 8. COMPLETION MARKER
+#    Output must contain "Chapter 14 complete".
+#
+# ============================================================
+# NOTES ON VARIANCE:
+# ============================================================
+#
+# - The demo uses mock logits, so probability values are deterministic.
+# - The exact token names/indices may vary.
+# - Multinomial sampling results will vary between runs (that's the point).
+# - Tests check structure and concepts, not exact numeric values.

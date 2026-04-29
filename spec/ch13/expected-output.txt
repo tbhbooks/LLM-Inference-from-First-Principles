@@ -1,0 +1,288 @@
+
+==============================================================================
+  PART 1: The Conductor — One Engine to Run Them All
+==============================================================================
+
+  The Engine holds five components:
+
+    Component         Role                          Chapter
+    ───────────────   ────────────────────────────   ───────
+    Scheduler         Decides who runs next          ch12
+    Model             Runs the forward pass          ch05-06
+    Tokenizer         Text <-> token IDs             ch04
+    Sampler           Picks the next token           ch07
+    BlockAllocator    Manages KV cache blocks        ch10
+
+  Engine config:
+    block_size        = 16
+    num_gpu_blocks    = 20  (320 token slots)
+    max_num_seqs      = 4
+    max_model_len     = 128
+
+  The engine does not compute. It conducts.
+  One method — step() — drives everything.
+
+==============================================================================
+  PART 2: Anatomy of a Step — Schedule, Forward, Sample, Update
+==============================================================================
+
+  Single request: "What is AI?" (4 prompt tokens, max_tokens=5)
+
+  Adding request A... tokenized to 4 tokens, needs 1 block.
+
+  --- Step 1 ---
+    Phase 1 SCHEDULE:  1 sequence scheduled (A: prefill)
+    Phase 2 ALLOCATE:  A gets 1 block → 19 free blocks
+    Phase 3 PREPARE:   A: 4 tokens at positions [0,1,2,3]
+    Phase 4 FORWARD:   batch of 4 tokens → logits
+    Phase 5 SAMPLE:    A → token 42
+    Phase 6 UPDATE:    A: 5 tokens total (4 prompt + 1 generated)
+    Status: 1 running, 0 waiting, 0 completed
+
+  --- Step 2 ---
+    Phase 1 SCHEDULE:  1 sequence scheduled (A: decode)
+    Phase 3 PREPARE:   A: 1 token at position [4]
+    Phase 4 FORWARD:   batch of 1 token → logits
+    Phase 5 SAMPLE:    A → token 87
+    Phase 6 UPDATE:    A: 6 tokens total (4 prompt + 2 generated)
+    Status: 1 running, 0 waiting, 0 completed
+
+  --- Step 3 ---
+    Phase 1 SCHEDULE:  1 sequence scheduled (A: decode)
+    Phase 3 PREPARE:   A: 1 token at position [5]
+    Phase 4 FORWARD:   batch of 1 token → logits
+    Phase 5 SAMPLE:    A → token 15
+    Phase 6 UPDATE:    A: 7 tokens total (4 prompt + 3 generated)
+    Status: 1 running, 0 waiting, 0 completed
+
+  --- Step 4 ---
+    Phase 1 SCHEDULE:  1 sequence scheduled (A: decode)
+    Phase 3 PREPARE:   A: 1 token at position [6]
+    Phase 4 FORWARD:   batch of 1 token → logits
+    Phase 5 SAMPLE:    A → token 63
+    Phase 6 UPDATE:    A: 8 tokens total (4 prompt + 4 generated)
+    Status: 1 running, 0 waiting, 0 completed
+
+  --- Step 5 ---
+    Phase 1 SCHEDULE:  1 sequence scheduled (A: decode)
+    Phase 3 PREPARE:   A: 1 token at position [7]
+    Phase 4 FORWARD:   batch of 1 token → logits
+    Phase 5 SAMPLE:    A → token 29
+    Phase 6 UPDATE:    A: 9 tokens total (4 prompt + 5 generated) → FINISHED (max_tokens)
+    Freed 1 block for A → 20 free blocks
+    Status: 0 running, 0 waiting, 1 completed
+
+  Request A completed: generated 5 tokens in 5 steps.
+
+==============================================================================
+  PART 3: Input Preparation — Wiring the Pieces
+==============================================================================
+
+  Prefill vs Decode — what prepare_inputs() produces:
+
+  PREFILL (first step for a request):
+    token_ids  = [2061, 318, 9552, 30]     // all prompt tokens
+    positions  = [0, 1, 2, 3]              // one position per token
+    block_table = [block_0]                // blocks allocated so far
+
+  DECODE (every subsequent step):
+    token_ids  = [42]                      // only the last generated token
+    positions  = [4]                       // its position in the sequence
+    block_table = [block_0]               // same block table
+
+  Batched (multiple sequences in one step):
+    Sequence A (decode): token_ids=[42], positions=[7]
+    Sequence B (prefill): token_ids=[15496, 995], positions=[0,1]
+
+    Combined batch:
+      token_ids  = [[42], [15496, 995]]
+      positions  = [[7], [0, 1]]
+      block_tables = [[block_3], [block_5]]
+
+  The model sees one batched forward call. It does not know or care
+  which sequences are prefilling vs decoding.
+
+==============================================================================
+  PART 4: The Update Phase — Tokens, Blocks, and Finish
+==============================================================================
+
+  After sampling, the update phase does three things:
+
+  1. APPEND TOKEN
+     seq.token_ids.append(new_token)
+     The sequence grows by one token.
+
+  2. ALLOCATE IF NEEDED
+     If total tokens > block_table capacity:
+       new_block = block_allocator.allocate()
+       seq.block_table.append_block(new_block)
+
+     Example: block_size=16, seq has 16 tokens in 1 block.
+     After appending token 17: needs 2 blocks → allocate block.
+
+  3. CHECK FINISH
+     Finished if: new_token == EOS
+                  or generated >= max_tokens
+                  or total_len >= max_model_len
+
+     On finish:
+       - Free all blocks: block_allocator.free(block_id) for each block
+       - Remove from scheduler's running queue
+       - Decode generated tokens → output text
+
+  Block tracking for request A (block_size=16, prompt=4, max_tokens=20):
+    Step  1: allocate block 0 (prefill, 4 tokens)    → 19 free
+    Step 13: token 17, allocate block 1               → 18 free
+    Step 21: finished, free blocks 0 and 1            → 20 free
+
+==============================================================================
+  PART 5: A Request's Full Journey
+==============================================================================
+
+  Three requests with staggered arrivals:
+
+  Before step 1: add A ("What is AI?", max_tokens=5)
+  Before step 2: add B ("Hello world", max_tokens=3)
+  Before step 3: add C ("Test prompt here", max_tokens=4)
+
+  --- Step 1 ---
+    Batch: [A(prefill)]
+    A: 4 prompt tokens → sample → token 42
+    Blocks: A=1 block, free=19
+    Status: A=Running
+
+  --- Step 2 ---
+    Batch: [A(decode), B(prefill)]
+    A: position 4 → sample → token 87
+    B: 2 prompt tokens → sample → token 55
+    Blocks: A=1, B=1, free=18
+    Status: A=Running, B=Running
+
+  --- Step 3 ---
+    Batch: [A(decode), B(decode), C(prefill)]
+    A: position 5 → sample → token 15
+    B: position 2 → sample → token 91
+    C: 3 prompt tokens → sample → token 33
+    Blocks: A=1, B=1, C=1, free=17
+    Status: A=Running, B=Running, C=Running
+
+  --- Step 4 ---
+    Batch: [A(decode), B(decode), C(decode)]
+    A: position 6 → sample → token 63
+    B: position 3 → sample → token 44 → FINISHED (max_tokens=3)
+    C: position 3 → sample → token 78
+    Freed 1 block for B → 18 free
+    Status: A=Running, C=Running
+
+  --- Step 5 ---
+    Batch: [A(decode), C(decode)]
+    A: position 7 → sample → token 29 → FINISHED (max_tokens=5)
+    C: position 4 → sample → token 12
+    Freed 1 block for A → 19 free
+    Status: C=Running
+
+  --- Step 6 ---
+    Batch: [C(decode)]
+    C: position 5 → sample → token 66
+    Status: C=Running
+
+  --- Step 7 ---
+    Batch: [C(decode)]
+    C: position 6 → sample → token 8 → FINISHED (max_tokens=4)
+    Freed 1 block for C → 20 free
+    Status: (all done)
+
+  Request Lifecycle Summary:
+    Request  Prompt_Len  Generated  Steps_Active  Status
+    ───────  ──────────  ─────────  ────────────  ──────────
+    A        4           5          1-5           Finished
+    B        2           3          2-4           Finished
+    C        3           4          3-7           Finished
+
+==============================================================================
+  PART 6: The Complete Pipeline
+==============================================================================
+
+  The full engine pipeline:
+
+    ┌─────────────────────────────────────────────────────┐
+    │  add_request("What is AI?", max_tokens=10)          │
+    │    1. tokenizer.encode() → [2061, 318, 9552, 30]    │
+    │    2. scheduler.add_sequence()                       │
+    │    3. status = Waiting                               │
+    └──────────────────────┬──────────────────────────────┘
+                           │
+                           ▼
+    ┌─────────────────────────────────────────────────────┐
+    │  step() — repeats until all requests finish         │
+    │                                                     │
+    │    ┌─ 1. scheduler.schedule()                       │
+    │    │     → which sequences run this iteration       │
+    │    │                                                │
+    │    ├─ 2. allocate blocks for new sequences          │
+    │    │     → block_allocator.allocate()               │
+    │    │                                                │
+    │    ├─ 3. prepare_inputs()                           │
+    │    │     → token_ids, positions, block_tables       │
+    │    │                                                │
+    │    ├─ 4. model.forward(inputs)                      │
+    │    │     → logits                                   │
+    │    │                                                │
+    │    ├─ 5. sampler.sample(logits)                     │
+    │    │     → new token IDs                            │
+    │    │                                                │
+    │    └─ 6. update sequences                           │
+    │          → append tokens, check finish              │
+    │          → free blocks for completed requests       │
+    └──────────────────────┬──────────────────────────────┘
+                           │
+                           ▼
+    ┌─────────────────────────────────────────────────────┐
+    │  completed requests                                 │
+    │    tokenizer.decode(generated_tokens) → text        │
+    └─────────────────────────────────────────────────────┘
+
+  Components and their chapters:
+    Tokenizer       ch04    text <-> token IDs
+    Model           ch05-06 forward pass + KV cache
+    Sampler         ch07    greedy argmax
+    BlockAllocator  ch10    paged KV cache blocks
+    Scheduler       ch12    FCFS + three queues
+    Engine          ch13    the conductor (this chapter)
+
+  The engine owns nothing but the loop.
+  Each component is a trait — swappable, testable, independent.
+  The step() method is the heartbeat. Every iteration: schedule, forward,
+  sample, update. That is the entire inference serving pipeline.
+
+==============================================================================
+  Chapter 13 complete. Next: Sampling Strategies (ch14)
+==============================================================================
+
+# ============================================================
+# VALIDATION RULES (what the test suite checks):
+# ============================================================
+#
+# 1. SECTION HEADERS
+#    All 6 parts present: "PART 1" through "PART 6"
+#
+# 2. ENGINE CONCEPTS
+#    "step" mentioned (core method)
+#    "schedule" mentioned (phase 1)
+#    "forward" mentioned (phase 4)
+#    "sample" mentioned (phase 5)
+#
+# 3. REQUEST LIFECYCLE
+#    "Waiting" status shown
+#    "Running" status shown
+#    "Finished" status shown
+#
+# 4. BLOCK TRACKING
+#    "free" blocks count shown
+#    Block allocation/deallocation visible
+#
+# 5. BATCHING
+#    Multiple requests in same step
+#
+# 6. CLOSING
+#    "Chapter 13 complete"
