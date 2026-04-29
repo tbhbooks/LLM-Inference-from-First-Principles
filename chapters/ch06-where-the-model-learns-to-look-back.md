@@ -589,3 +589,19 @@ The model can predict the next token. Given "What is AI?", it says " The" is the
 That loop --- and the sampling strategies that make it interesting (temperature, top-k, top-p) --- is Chapter 7. The KV cache you just built will pay off immediately: without it, each step would reprocess the entire growing sequence from scratch.
 
 The model has a voice. Next chapter, we let it speak.
+
+---
+
+## References
+
+### The Transformer Architecture
+
+1. **"Attention Is All You Need"** — Vaswani, Shazeer, Parmar, Uszkoreit, Jones, Gomez, Kaiser, Polosukhin (2017). The foundational paper that introduced the Transformer architecture, multi-head self-attention, and positional encoding. Everything in this chapter --- queries, keys, values, the scaled dot-product, multi-head splitting --- originates here. [arxiv.org/abs/1706.03762](https://arxiv.org/abs/1706.03762)
+
+### Pre-Norm vs Post-Norm
+
+2. **"On Layer Normalization in the Transformer Architecture"** — Xiong, Yang, He, Zheng, Zheng, Xing, Zhang, Lan, Wang, Liu (2020). Analyzes why pre-norm (used in GPT-2) is more stable during training than the original post-norm from Vaswani et al. Explains the gradient flow advantage that made pre-norm the default in modern LLMs. [arxiv.org/abs/2002.04745](https://arxiv.org/abs/2002.04745)
+
+### KV Cache
+
+3. **"Fast Transformer Decoding: One Write-Head is All You Need"** — Shazeer (2019). Introduces multi-query attention, which reduces KV cache size by sharing keys and values across heads. Directly relevant to the KV cache growth discussed at the end of this chapter. [arxiv.org/abs/1911.02150](https://arxiv.org/abs/1911.02150)

@@ -323,3 +323,17 @@ Your engine now generates structured, streaming, efficient text. Sampling strate
 But there is a problem that no amount of clever decoding can solve. The model you are running --- GPT-2 at 500MB --- fits comfortably on a single GPU. A 70-billion-parameter model does not. Its weights alone consume 140 GB in fp16. No single GPU has that much memory.
 
 You need to split the model across multiple GPUs. Split the layers, split the attention heads, split the work. Next chapter: tensor parallelism.
+
+---
+
+## References
+
+### Grammar-Constrained Decoding
+
+1. **"Efficient Guided Generation for Large Language Models"** — Willard, Louf (2023). The Outlines paper. Formalizes the FSM-based approach to constrained decoding: compile a regex or grammar into a finite-state machine, precompute valid token masks per state, apply masks at each decode step. Our `GrammarConstraint` design follows this approach directly. [arxiv.org/abs/2307.09702](https://arxiv.org/abs/2307.09702)
+
+2. **"Guidance"** — Microsoft (2023). A framework for interleaving generation with constraints using a context-free grammar. Takes a different approach from Outlines --- embeds constraints into a template language rather than compiling to an FSM. [github.com/guidance-ai/guidance](https://github.com/guidance-ai/guidance)
+
+### JSON Schema and Structured Output
+
+3. **"Introducing Structured Outputs in the API"** — OpenAI (2024). Production implementation of guaranteed JSON schema adherence. Demonstrates that grammar-constrained decoding is practical at scale without significant latency overhead. [openai.com/index/introducing-structured-outputs-in-the-api](https://openai.com/index/introducing-structured-outputs-in-the-api/)

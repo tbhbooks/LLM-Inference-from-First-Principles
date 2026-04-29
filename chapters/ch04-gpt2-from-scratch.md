@@ -332,3 +332,19 @@ You have the raw weights. 148 tensors, 124 million numbers. But weights are just
 How does token 2061 ("What") turn into a 768-dimensional vector? What transforms that vector? How does the model decide which earlier tokens are relevant to which later tokens?
 
 Next chapter: we take those weight matrices and build the first layers --- embedding, normalization, the feed-forward network. By the end, you will watch "What is AI?" enter as four integers and emerge as four rich 768-dimensional vectors, transformed through a LayerNorm and an MLP. Not the full model yet --- but the first proof that the weights are alive.
+
+---
+
+## References
+
+### The GPT-2 Model
+
+1. **"Language Models are Unsupervised Multitask Learners"** — Radford, Wu, Child, Luan, Amodei, Sutskever (2019). The original GPT-2 paper. Describes the architecture, training data (WebText), and the surprising finding that language models can perform downstream tasks without explicit supervision. [cdn.openai.com/better-language-models/language_models_are_unsupervised_multitask_learners.pdf](https://cdn.openai.com/better-language-models/language_models_are_unsupervised_multitask_learners.pdf)
+
+### Tokenization
+
+2. **"Neural Machine Translation of Rare Words with Subword Units" (BPE)** — Sennrich, Haddow, Birch (2016). The byte-pair encoding algorithm used by GPT-2's tokenizer. Starts with characters, iteratively merges the most frequent pair into a new token. [arxiv.org/abs/1508.07909](https://arxiv.org/abs/1508.07909)
+
+### Model Hosting
+
+3. **Hugging Face Model Hub — openai-community/gpt2**. The GPT-2 124M weights and tokenizer files used in this chapter. [huggingface.co/openai-community/gpt2](https://huggingface.co/openai-community/gpt2)

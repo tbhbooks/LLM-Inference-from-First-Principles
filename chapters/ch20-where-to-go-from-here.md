@@ -173,3 +173,47 @@ Every new inference engine --- every new optimization, every new serving framewo
 The next paper is not a mystery. It is a diff against your implementation.
 
 Go read it.
+
+---
+
+## References
+
+All papers referenced throughout this chapter, collected here for convenience.
+
+### Foundational Architecture
+
+1. **"Attention Is All You Need"** — Vaswani, Shazeer, Parmar, Uszkoreit, Jones, Gomez, Kaiser, Polosukhin (2017). The Transformer. [arxiv.org/abs/1706.03762](https://arxiv.org/abs/1706.03762)
+
+### Attention Optimization
+
+2. **"FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness"** — Dao, Fu, Ermon, Rudra, Ré (2022). IO-aware attention that avoids materializing the full attention matrix. [arxiv.org/abs/2205.14135](https://arxiv.org/abs/2205.14135)
+
+3. **"FlashAttention-2: Faster Attention with Better Parallelism and Work Partitioning"** — Dao (2023). Improved GPU occupancy and work partitioning. [arxiv.org/abs/2307.08691](https://arxiv.org/abs/2307.08691)
+
+### Memory Management and Serving
+
+4. **"Efficient Memory Management for Large Language Model Serving with PagedAttention"** — Kwon, Li, Zhuang, Sheng, Zheng, Yu, Gonzalez, Zhang, Stoica (2023). PagedAttention and vLLM. [arxiv.org/abs/2309.06180](https://arxiv.org/abs/2309.06180)
+
+5. **"Orca: A Distributed Serving System for Transformer-Based Generative Models"** — Yu, Jeong, Shin, Park (2022). Iteration-level scheduling (continuous batching). [usenix.org/system/files/osdi22-yu.pdf](https://www.usenix.org/system/files/osdi22-yu.pdf)
+
+### Speculative Decoding
+
+6. **"SpecInfer: Accelerating Generative Large Language Model Serving with Tree-based Speculative Inference and Verification"** — Miao et al. (2023). Tree-structured speculation. [arxiv.org/abs/2305.09781](https://arxiv.org/abs/2305.09781)
+
+7. **"Medusa: Simple LLM Inference Acceleration Framework with Multiple Decoding Heads"** — Cai et al. (2024). Draft-free speculative decoding with auxiliary heads. [arxiv.org/abs/2401.10774](https://arxiv.org/abs/2401.10774)
+
+8. **"EAGLE: Speculative Sampling Requires Rethinking Feature Uncertainty"** — Li et al. (2024). Feature-level draft prediction for higher acceptance rates. [arxiv.org/abs/2401.15077](https://arxiv.org/abs/2401.15077)
+
+### Structured Generation and Serving Frameworks
+
+9. **"SGLang: Efficient Execution of Structured Language Model Programs"** — Zheng, Yin, Xie, Cheng, Li, Stoica, Gonzalez, Zhang (2024). RadixAttention and structured language model programs. [arxiv.org/abs/2312.07104](https://arxiv.org/abs/2312.07104)
+
+10. **"Efficient Guided Generation for Large Language Models"** — Willard, Louf (2023). FSM-based constrained decoding (Outlines). [arxiv.org/abs/2307.09702](https://arxiv.org/abs/2307.09702)
+
+11. **"Guidance"** — Microsoft (2023). Template-based constrained generation. [github.com/guidance-ai/guidance](https://github.com/guidance-ai/guidance)
+
+### Parallelism
+
+12. **"Megatron-LM: Training Multi-Billion Parameter Language Models Using Model Parallelism"** — Shoeybi, Patwary, Puri, Micikevicius, Catanzaro (2019). Tensor parallelism for Transformers. [arxiv.org/abs/1909.08053](https://arxiv.org/abs/1909.08053)
+
+13. **"DeepSeek-V3 Technical Report"** — DeepSeek (2024). Combined TP, PP, and expert parallelism at scale. [arxiv.org/abs/2412.19437](https://arxiv.org/abs/2412.19437)

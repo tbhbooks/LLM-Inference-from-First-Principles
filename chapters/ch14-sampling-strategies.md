@@ -417,3 +417,19 @@ But there is a problem. Every parameter we just built --- temperature, top_k, to
 A real inference server needs an API. HTTP endpoints. JSON request bodies where each request carries its own SamplingParams. Streaming responses so the user sees tokens as they are generated, not all at once after a 30-second wait.
 
 Next chapter, we build that API server. The engine loop stays the same. The sampler stays the same. We just put an HTTP layer in front of it --- and suddenly this is not a CLI tool anymore. It is a service.
+
+---
+
+## References
+
+### Nucleus Sampling (Top-p)
+
+1. **"The Curious Case of Neural Text Degeneration"** — Holtzman, Buys, Du, Forbes, Choi (2020). Introduced nucleus sampling (top-p), showing that likelihood-maximizing decoding (beam search, greedy) produces degenerate, repetitive text. The paper demonstrates why top-p adapts to confidence better than fixed top-k. The core idea behind our top-p implementation. [arxiv.org/abs/1904.09751](https://arxiv.org/abs/1904.09751)
+
+### Temperature and Softmax
+
+2. **"Distilling the Knowledge in a Neural Network"** — Hinton, Vinyals, Dean (2015). While focused on knowledge distillation, this paper formalized the "temperature" parameter in the softmax function. The temperature scaling used in our sampling pipeline comes directly from this formulation. [arxiv.org/abs/1503.02531](https://arxiv.org/abs/1503.02531)
+
+### Repetition Penalty
+
+3. **"CTRL: A Conditional Transformer Language Model for Controllable Generation"** — Keskar, McCann, Varshney, Xiong, Socher (2019). Introduced the repetition penalty mechanism that penalizes previously generated tokens by dividing their logits by a penalty factor. Our implementation follows their approach. [arxiv.org/abs/1909.05858](https://arxiv.org/abs/1909.05858)

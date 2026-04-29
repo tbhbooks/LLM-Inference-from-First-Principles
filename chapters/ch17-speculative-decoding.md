@@ -389,3 +389,19 @@ That is guided decoding, and it is where we are headed next.
 ---
 
 *Next: [Chapter 18 --- Guided Decoding](ch18-guided-decoding.md)*
+
+---
+
+## References
+
+### Speculative Decoding — Foundational Papers
+
+1. **"Fast Inference from Transformers via Speculative Decoding"** — Leviathan, Kalman, Matias (2023). One of the two independent discoveries of speculative decoding. Proves that the draft-then-verify approach produces output distributions identical to the target model (the "lossless" guarantee). The rejection sampling criterion in this chapter comes directly from this paper. [arxiv.org/abs/2211.17192](https://arxiv.org/abs/2211.17192)
+
+2. **"Accelerating Large Language Model Decoding with Speculative Sampling"** — Chen, Borgeaud, Irving, Lespiau, Sifre, Jumper (2023). The other independent discovery, from DeepMind. Formalizes speculative sampling and proves the same distribution-preservation guarantee via a different mathematical path. [arxiv.org/abs/2302.01318](https://arxiv.org/abs/2302.01318)
+
+### Advanced Speculative Methods
+
+3. **"SpecInfer: Accelerating Generative Large Language Model Serving with Tree-based Speculative Inference and Verification"** — Miao, Oliaro, Zhang, Cheng, Wang, Wong, Zhu, Jia, Avestimehr (2023). Extends speculative decoding with tree-structured speculation --- multiple candidate continuations verified in parallel. Improves acceptance rates when the draft model is uncertain. [arxiv.org/abs/2305.09781](https://arxiv.org/abs/2305.09781)
+
+4. **"Medusa: Simple LLM Inference Acceleration Framework with Multiple Decoding Heads"** — Cai, Li, Geng, Peng, Lee, Chen (2024). Eliminates the separate draft model entirely by adding lightweight prediction heads to the target model itself. Each head predicts a different future position, enabling parallel verification without a second model. [arxiv.org/abs/2401.10774](https://arxiv.org/abs/2401.10774)

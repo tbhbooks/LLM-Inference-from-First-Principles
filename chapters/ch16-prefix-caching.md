@@ -337,3 +337,13 @@ During decode, the model generates one token per forward pass. One token. The GP
 What if you could generate *multiple* tokens per forward pass? Not by making the model faster, but by letting a smaller, cheaper model *guess* the next several tokens, and then having the big model verify them all at once?
 
 Next chapter: speculative decoding. The small model drafts. The big model edits. And the GPU finally has enough work to stay busy.
+
+---
+
+## References
+
+### Prefix Caching in Practice
+
+1. **"SGLang: Efficient Execution of Structured Language Model Programs"** — Zheng, Yin, Xie, Cheng, Li, Stoica, Gonzalez, Zhang (2024). Introduces RadixAttention, a radix-tree based prefix caching system that automatically detects and reuses shared prefixes across requests. The hash-chaining approach in this chapter is a simplified version of the same core idea. [arxiv.org/abs/2312.07104](https://arxiv.org/abs/2312.07104)
+
+2. **"Efficient Memory Management for Large Language Model Serving with PagedAttention"** — Kwon et al. (2023). Section 5.3 describes vLLM's automatic prefix caching (APC), where hash-based block identification enables prefix sharing without explicit user annotation. Our `PrefixCache` design follows their approach. [arxiv.org/abs/2309.06180](https://arxiv.org/abs/2309.06180)

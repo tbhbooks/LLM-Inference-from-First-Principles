@@ -314,3 +314,15 @@ You now know that decisions happen every iteration. But we have not built the th
 These are the scheduler's problems. It juggles three competing goals: maximize throughput (keep the batch full), minimize latency (start requests quickly), and respect memory limits (do not overcommit KV cache blocks).
 
 Next chapter: we build the scheduler.
+
+---
+
+## References
+
+### Continuous Batching
+
+1. **"Orca: A Distributed Serving System for Transformer-Based Generative Models"** — Yu, Jeong, Shin, Park (2022). The paper that introduced iteration-level scheduling (continuous batching) for LLM serving. Demonstrates that scheduling at the iteration level rather than the request level dramatically improves GPU utilization and throughput. The core idea behind this entire chapter. [osdi22-yu.pdf](https://www.usenix.org/system/files/osdi22-yu.pdf)
+
+### Serving Systems
+
+2. **"Efficient Memory Management for Large Language Model Serving with PagedAttention"** — Kwon et al. (2023). vLLM combines PagedAttention (Chapter 10) with continuous batching (this chapter) into a single system. Section 5 describes the scheduling policy that builds on Orca's iteration-level approach. [arxiv.org/abs/2309.06180](https://arxiv.org/abs/2309.06180)

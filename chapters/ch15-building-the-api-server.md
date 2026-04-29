@@ -443,3 +443,15 @@ Your engine has a front door now. Any tool that speaks the OpenAI API --- chat U
 But watch what happens when you send 10 requests, all starting with the same system prompt: "You are a helpful assistant." Each one tokenizes that prefix independently. Each one computes the same KV cache entries for those same tokens. Ten copies of identical work. On a flagship GPU with a 16k-token system prompt, that is 10x wasted compute and 10x wasted memory.
 
 Next chapter, we fix that. Prefix caching detects when requests share a common prompt prefix and reuses the KV cache entries instead of recomputing them. Same tokens, same keys and values --- compute them once, share them everywhere.
+
+---
+
+## References
+
+### The OpenAI API Specification
+
+1. **OpenAI API Reference — Chat Completions**. The API contract our server implements: `/v1/chat/completions` with streaming SSE, `SamplingParams` in the request body, and `finish_reason` in the response. [platform.openai.com/docs/api-reference/chat](https://platform.openai.com/docs/api-reference/chat)
+
+### Server-Sent Events
+
+2. **"Server-Sent Events" — W3C / WHATWG Specification**. The streaming protocol used for token-by-token delivery. Each token is a `data:` line in an SSE stream, terminated by `data: [DONE]`. [html.spec.whatwg.org/multipage/server-sent-events.html](https://html.spec.whatwg.org/multipage/server-sent-events.html)

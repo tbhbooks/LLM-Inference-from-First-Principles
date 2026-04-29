@@ -147,7 +147,7 @@ The analogy to KV caches is almost exact:
 | Address mapping | Page table | None (direct) | Block table |
 | Concurrent users | Thousands | Single digits | Hundreds |
 
-**Figure 9.4** --- The OS analogy. Every column in the "Paged KV Cache" row mirrors the OS solution.
+**Table 9.1** --- The OS analogy. Every column in the "Paged KV Cache" row mirrors the OS solution.
 
 The insight is simple: **if you stop requiring contiguous allocation, both fragmentation problems vanish.**
 
@@ -242,3 +242,15 @@ The fix has been known since the 1960s. Split memory into fixed-size blocks. Map
 In LLM inference, this idea has a name: **PagedAttention**. It is the single most important architectural innovation in vLLM, and it is why vLLM can serve 10-20x more concurrent requests than naive engines on the same hardware.
 
 Next chapter: we build it.
+
+---
+
+## References
+
+### PagedAttention and vLLM
+
+1. **"Efficient Memory Management for Large Language Model Serving with PagedAttention"** — Kwon, Li, Zhuang, Sheng, Zheng, Yu, Gonzalez, Zhang, Stoica (2023). The paper that introduced PagedAttention and vLLM. Quantifies the internal and external fragmentation problems described in this chapter and shows how OS-style paging eliminates them. The numbers in our "Seven Requests on a Flagship GPU" section are inspired by their waste analysis. [arxiv.org/abs/2309.06180](https://arxiv.org/abs/2309.06180)
+
+### Operating Systems Background
+
+2. **"Operating Systems: Three Easy Pieces" (OSTEP)** — Arpaci-Dusseau, Arpaci-Dusseau (2018). Free online textbook. Chapters 15-24 cover virtual memory, paging, and page tables --- the exact OS concepts that PagedAttention adapts for KV cache management. [pages.cs.wisc.edu/~remzi/OSTEP/](https://pages.cs.wisc.edu/~remzi/OSTEP/)

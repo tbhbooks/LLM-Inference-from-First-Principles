@@ -1,6 +1,8 @@
-# The Builder's Handbook (TBH): LLM Inference from First Principles [WIP]
+# The Builder's Handbook (TBH): LLM Inference from First Principles
 
-**Learn How LLM Inference Works — From the inside Out.**
+> **⚠️ Work in Progress** — This book is actively being written. Chapters may change.
+
+**Learn How LLM Inference Works at Scale — From the inside Out.**
 
 You send a prompt to ChatGPT, Claude, or a local model. Tokens stream back one by one. Behind the scenes, an inference engine is managing memory, batching requests, and deciding what to compute next.
 

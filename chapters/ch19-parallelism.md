@@ -464,3 +464,19 @@ And then Part IV. An API server (Chapter 15). Prefix caching to skip redundant c
 That is vLLM. Not the code --- the ideas. PagedAttention, continuous batching, prefix caching, speculative decoding, tensor and pipeline parallelism. These are the ideas that make large-scale LLM inference possible. You did not just read about them. You built them, one chapter at a time, from first principles.
 
 Next chapter: where the field is going, and where your engine can go next.
+
+---
+
+## References
+
+### Tensor Parallelism
+
+1. **"Megatron-LM: Training Multi-Billion Parameter Language Models Using Model Parallelism"** — Shoeybi, Patwary, Puri, Micikevicius, Catanzaro (2019). The paper that introduced the column/row partitioning strategy for tensor parallelism in Transformers. Our AllReduce-based attention and MLP splitting follows their approach directly. [arxiv.org/abs/1909.08053](https://arxiv.org/abs/1909.08053)
+
+### Pipeline Parallelism
+
+2. **"GPipe: Efficient Training of Giant Neural Networks using Pipeline Parallelism"** — Huang, Cheng, Bapna, Firat, Chen, Chen, Lee, Ngiam, Le, Wu, Chen (2019). Introduced microbatching to reduce the pipeline bubble. The bubble analysis and microbatch scheduling in this chapter follow GPipe's approach. [arxiv.org/abs/1811.06965](https://arxiv.org/abs/1811.06965)
+
+### Combined Parallelism Strategies
+
+3. **"DeepSeek-V3 Technical Report"** — DeepSeek (2024). A production example of combining TP, PP, and expert parallelism (for MoE models) at massive scale. Demonstrates the real-world tradeoffs of choosing TP and PP dimensions based on interconnect topology. [arxiv.org/abs/2412.19437](https://arxiv.org/abs/2412.19437)

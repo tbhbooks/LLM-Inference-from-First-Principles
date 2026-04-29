@@ -98,7 +98,7 @@ Each decode step adds exactly one row to the KV cache. No causal mask needed —
 | **Output logits** | `[1, T, 50257]` — use last position | `[1, 1, 50257]` |
 | **Runs** | Once | Up to max_tokens times |
 
-**Figure 7.2** — Prefill vs. decode: same model, different jobs.
+**Table 7.1** — Prefill vs. decode: same model, different jobs.
 
 This two-phase design is *the* key insight of modern LLM serving. Without the KV cache you built in chapter 6, every decode step would need to reprocess the entire sequence from scratch — quadratic cost. With the cache, each step is constant-time in the model's computation (though attention still reads the full cache, so it grows linearly). For a 200-token generation with a 6-token prompt, the naive approach runs 206 * 200 / 2 = ~20,600 token-positions through the model. The cached approach runs 6 + 200 = 206. That is a 100x difference.
 
@@ -188,7 +188,7 @@ stateDiagram-v2
     Done --> Output : decode token IDs to text
     Output --> [*]
 ```
-**Figure 7.3** — Generation loop as a state machine. Prefill runs once; decode loops until a stop condition.
+**Figure 7.2** — Generation loop as a state machine. Prefill runs once; decode loops until a stop condition.
 
 ---
 
@@ -240,7 +240,7 @@ sequenceDiagram
     Tok-->>CLI: " a key part of the..."
     CLI->>CLI: Print text + stats
 ```
-**Figure 7.4** — Complete generation flow: encode, prefill, decode loop, output.
+**Figure 7.3** — Complete generation flow: encode, prefill, decode loop, output.
 
 Notice how the KV cache grows by exactly one position per decode step. After prefill it holds 6 positions. After 200 decode steps it holds 206. The model's query on each decode step is a single token, but the attention mechanism reads keys and values from the *entire* cache — all 206 positions.
 
@@ -254,7 +254,7 @@ flowchart LR
         S3 --> SN["...<br/>Step N<br/>[1, 12, 6+N, 64]"]
     end
 ```
-**Figure 7.5** — KV cache grows by one position per decode step. Each step, the query attends to all cached keys. Only new K,V are computed — past entries are reused.
+**Figure 7.4** — KV cache grows by one position per decode step. Each step, the query attends to all cached keys. Only new K,V are computed — past entries are reused.
 
 For GPT-2 124M, each cache entry per layer is `2 * 12 * 64 * 4 bytes` (K and V, 12 heads, 64 dim, float32) = 6,144 bytes. With 12 layers, each new position adds about 72 KB to the cache. After 200 tokens, the cache holds roughly 15 MB. Small for GPT-2. For a 70B model with 80 layers and 8,192 dimensions? The cache is the memory bottleneck. That story comes later.
 

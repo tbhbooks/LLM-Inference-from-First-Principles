@@ -146,7 +146,7 @@ Here is the mapping for every 8th token:
 | 32 | 2 | 7 | 0 | 112 |
 | 36 | 2 | 7 | 4 | 116 |
 
-**Figure 10.2** --- Physical slots jump around: 64, 72, 16, 24, 112, 116. Not contiguous. The block table makes the non-contiguity invisible to the model.
+**Table 10.1** --- Physical slots jump around: 64, 72, 16, 24, 112, 116. Not contiguous. The block table makes the non-contiguity invisible to the model.
 
 ---
 
@@ -203,7 +203,7 @@ sequenceDiagram
     Note over Alloc: 6 free
     Note over D: D may get B's old blocks<br/>Non-contiguous? Irrelevant.
 ```
-**Figure 10.3** --- Block reuse after deallocation. D's three blocks may include B's recycled blocks. No fragmentation concern.
+**Figure 10.2** --- Block reuse after deallocation. D's three blocks may include B's recycled blocks. No fragmentation concern.
 
 ---
 
@@ -269,3 +269,17 @@ Right now, your engine runs one request at a time. To serve a hundred concurrent
 This is the scheduling problem. vLLM's answer is **continuous batching** --- a scheduler that makes these decisions every single iteration of the generation loop.
 
 Next chapter: we build it.
+
+---
+
+## References
+
+### PagedAttention
+
+1. **"Efficient Memory Management for Large Language Model Serving with PagedAttention"** — Kwon, Li, Zhuang, Sheng, Zheng, Yu, Gonzalez, Zhang, Stoica (2023). The foundational paper for this chapter. Introduces the block table, physical block allocation, and the paged attention kernel that makes non-contiguous KV cache work without performance loss. Our block allocator and block table design follow their approach directly. [arxiv.org/abs/2309.06180](https://arxiv.org/abs/2309.06180)
+
+### Memory-Efficient Attention
+
+2. **"FlashAttention: Fast and Memory-Efficient Exact Attention with IO-Awareness"** — Dao, Fu, Ermon, Rudra, Ré (2022). Fuses the attention computation into a single kernel to avoid materializing the full attention matrix. Complementary to PagedAttention --- FlashAttention optimizes the *compute*, PagedAttention optimizes the *storage*. [arxiv.org/abs/2205.14135](https://arxiv.org/abs/2205.14135)
+
+3. **"FlashAttention-2: Faster Attention with Better Parallelism and Work Partitioning"** — Dao (2023). Improves on FlashAttention with better GPU occupancy. The paged variant (FlashAttention + PagedAttention) is how production vLLM achieves both memory efficiency and compute efficiency. [arxiv.org/abs/2307.08691](https://arxiv.org/abs/2307.08691)
