@@ -50,7 +50,7 @@ Tokenizer check:
 #    Parse the std value; std > 0.001.
 #
 # 5. NO NaN
-#    No tensor stat line should contain NaN or Inf.
+#    No tensor metric line should contain NaN or Inf.
 #
 # 6. CONV1D EVIDENCE
 #    Output should mention transpose or Conv1D handling.

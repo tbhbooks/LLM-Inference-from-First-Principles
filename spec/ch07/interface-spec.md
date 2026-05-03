@@ -169,7 +169,7 @@ Speed: X.XX tokens/sec
 | No degenerate repetition | No word repeated 10+ times consecutively |
 | Prompt echo | Prompt appears in output |
 | No NaN | No NaN/Inf in generated text |
-| Speed stat | Reports tokens/sec |
+| Speed metric | Reports tokens/sec |
 | Token count | Reports number of generated tokens |
 | Timing | Reports wall-clock time |
 | Exit 0 | Process exits successfully |

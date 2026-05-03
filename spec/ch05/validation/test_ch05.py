@@ -75,10 +75,10 @@ class TestEmbeddingShape:
 
 
 class TestPartialForwardPass:
-    """Verify the partial forward pass produces valid tensor stats."""
+    """Verify the partial forward pass produces valid tensor metrics."""
 
-    def _parse_tensor_stat(self, output: str, step_name: str) -> dict:
-        """Parse a tensor stat line like 'step_name: shape=[1, 4, 768], mean=-0.0012, std=0.0345'."""
+    def _parse_tensor_metric(self, output: str, step_name: str) -> dict:
+        """Parse a tensor metric line like 'step_name: shape=[1, 4, 768], mean=-0.0012, std=0.0345'."""
         # Look for the step name followed by stats
         pattern = rf"{step_name}.*?mean\s*=\s*([-\d.eE+]+).*?std\s*=\s*([-\d.eE+]+)"
         match = re.search(pattern, output, re.IGNORECASE)
@@ -91,14 +91,14 @@ class TestPartialForwardPass:
 
     def test_layernorm_mean_near_zero(self, ch05_output: str):
         """LayerNorm output should have mean close to 0."""
-        stats = self._parse_tensor_stat(ch05_output, "ln_1")
+        stats = self._parse_tensor_metric(ch05_output, "ln_1")
         if not stats:
             # Try alternative names
-            stats = self._parse_tensor_stat(ch05_output, "layernorm")
+            stats = self._parse_tensor_metric(ch05_output, "layernorm")
             if not stats:
-                stats = self._parse_tensor_stat(ch05_output, "normed")
+                stats = self._parse_tensor_metric(ch05_output, "normed")
         assert stats, (
-            "Could not find LayerNorm tensor stats in output. "
+            "Could not find LayerNorm tensor metrics in output. "
             "Expected a line like 'ln_1_block0: shape=[1, 4, 768], mean=X.XXXX, std=X.XXXX'\n"
             f"Got:\n{ch05_output}"
         )
@@ -109,9 +109,9 @@ class TestPartialForwardPass:
 
     def test_mlp_output_nonzero(self, ch05_output: str):
         """MLP output should have non-zero standard deviation."""
-        stats = self._parse_tensor_stat(ch05_output, "mlp")
+        stats = self._parse_tensor_metric(ch05_output, "mlp")
         assert stats, (
-            "Could not find MLP tensor stats in output. "
+            "Could not find MLP tensor metrics in output. "
             "Expected a line like 'mlp_block0: shape=[1, 4, 768], mean=X.XXXX, std=X.XXXX'\n"
             f"Got:\n{ch05_output}"
         )
@@ -120,19 +120,19 @@ class TestPartialForwardPass:
             "This suggests the MLP is producing constant output — likely Conv1D weights not transposed."
         )
 
-    def test_no_nan_in_stats(self, ch05_output: str):
-        """No tensor stat should contain NaN or Inf."""
+    def test_no_nan_in_metrics(self, ch05_output: str):
+        """No tensor metric line should contain NaN or Inf."""
         nan_patterns = [r'\bnan\b', r'\bNaN\b', r'\bNAN\b', r'\binf\b', r'\bInf\b', r'\bINF\b']
-        # Only check lines that look like tensor stats
-        stat_lines = [
+        # Only check lines that look like tensor metrics
+        metric_lines = [
             line for line in ch05_output.split("\n")
             if "mean" in line.lower() and "std" in line.lower()
         ]
-        for line in stat_lines:
+        for line in metric_lines:
             for pattern in nan_patterns:
                 match = re.search(pattern, line)
                 assert match is None, (
-                    f"Found '{match.group()}' in tensor stats: {line}\n"
+                    f"Found '{match.group()}' in tensor metrics: {line}\n"
                     "This indicates broken computation (likely missing LayerNorm epsilon)."
                 )
 

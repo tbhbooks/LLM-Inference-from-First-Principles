@@ -1,0 +1,103 @@
+{
+  "manifest_version": "1.0.0",
+  "scope": "book",
+  "registry": {
+    "url": "https://raw.githubusercontent.com/tbhbooks/tbh-skill/main/books/registry.json",
+    "supports_multiple_books": true
+  },
+  "agent_kit": {
+    "name": "tbhbooks-agent-kit",
+    "version": "1.0.4",
+    "download_url": "https://github.com/tbhbooks/tbhbooks-agent-kit/releases/download/tbhbooks-agent-kit-v1.0.4/tbhbooks-agent-kit-v1.0.4.zip",
+    "install_path": ".tbh/tbhbooks-agent-kit",
+    "fallback": "local-minimal",
+    "requires_consent_before_download": true,
+    "requires_separate_consent_before_execute": true
+  },
+  "book": {
+    "id": "llm-inference",
+    "title": "The Builder's Handbook: LLM Inference from First Principles",
+    "project_name": "rvllm",
+    "repo": "https://github.com/tbhbooks/LLM-Inference-from-First-Principles",
+    "raw_base": "https://raw.githubusercontent.com/tbhbooks/LLM-Inference-from-First-Principles/main",
+    "spec_path": "spec",
+    "chapters_path": "chapters",
+    "context_file": "BOOK_CONTEXT.md",
+    "agent_entry_file": "AGENTS.md",
+    "prompt_gallery_file": "PROMPT_GALLERY.md",
+    "reader_guide_file": "READER_GUIDE.md",
+    "total_chapters": 20,
+    "default_language": "rust"
+  },
+  "spec": {
+    "chapter_format": "chNN",
+    "required_files": [
+      "prompt-template.md",
+      "interface-spec.md",
+      "expected-output.txt"
+    ],
+    "optional_files": [
+      "component-diagram.md",
+      "sequence-diagram.md"
+    ]
+  },
+  "validation": {
+    "type": "pytest-subprocess",
+    "command_env_prefix": "RVLLM",
+    "env_var_pattern": "RVLLM_CH{NN}_BIN",
+    "runner_docs": "spec/runners/README.md"
+  },
+  "state": {
+    "directory": ".tbh",
+    "config_file": ".tbh/config.json",
+    "progress_file": ".tbh/progress.json",
+    "cache_directory": ".tbh/cache",
+    "agent_kit_directory": ".tbh/tbhbooks-agent-kit"
+  },
+  "commands": [
+    "setup",
+    "status",
+    "build-chapter",
+    "validate",
+    "hint",
+    "review",
+    "next",
+    "switch",
+    "explain"
+  ],
+  "targets": {
+    "root": {
+      "required_files": [
+        "AGENTS.md",
+        "BOOK_CONTEXT.md",
+        "CLAUDE.md",
+        "CODEX.md",
+        "CURSOR.md",
+        "PROMPT_GALLERY.md",
+        "READER_GUIDE.md"
+      ]
+    },
+    "cursor": {
+      "required_files": [
+        "CURSOR.md",
+        ".cursor/rules/tbh-reader.mdc"
+      ]
+    },
+    "claude": {
+      "required_files": [
+        "CLAUDE.md"
+      ]
+    },
+    "codex": {
+      "required_files": [
+        "CODEX.md"
+      ]
+    },
+    "generic": {
+      "required_files": [
+        "AGENTS.md",
+        "agents/generic/bootstrap-prompt.md"
+      ]
+    }
+  }
+}

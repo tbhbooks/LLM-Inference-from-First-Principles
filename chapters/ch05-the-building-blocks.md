@@ -316,7 +316,7 @@ Everything described above is formalized in [`spec/ch05/`](../spec/ch05/):
 | `interface-spec.md` | Embedding, LayerNorm, Linear, MLP contracts and signatures |
 | `component-diagram.md` | Layer structure and data flow |
 | `sequence-diagram.md` | Partial forward pass execution flow |
-| `expected-output.txt` | Output format with tensor stat ranges |
+| `expected-output.txt` | Output format with tensor metric ranges |
 | `prompt-template.md` | Paste into an LLM to generate an implementation |
 | `validation/` | `pytest spec/ch05/validation/` --- 8 tests |
 

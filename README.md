@@ -14,6 +14,18 @@ Most developers never look inside that machine. This book opens it up — and op
 
 **Build as you read.** Start at Chapter 0 to set up your environment. Each chapter has a spec and validation tests. You build, you run, you see it work. Specs are language-agnostic — bring Rust, Python, Go, or whatever you prefer.
 
+## Agent Quick Start
+
+If you are using Cursor, Claude Code, Codex, OpenClaw, or another coding agent:
+
+1. Open this repo in your coding agent.
+2. Ask it to read [`AGENTS.md`](AGENTS.md) first.
+3. Let it inspect `agents/manifest.json`, [`BOOK_CONTEXT.md`](BOOK_CONTEXT.md), and [Chapter 0](chapters/ch00-setup.md).
+4. If it offers to install `tbhbooks-agent-kit`, approve only after it shows the pinned version and release URL.
+5. Ask: `Start with Chapter 0 setup for this TBH book, create the rvllm workspace, then continue to Chapter 1 in guided build mode.`
+
+The default build target for this book is `rvllm` in Rust. Validation is subprocess-driven: the agent should help you build a chapter binary, set the matching `RVLLM_CHNN_BIN` environment variable, and run the chapter tests in `spec/chNN/validation/`.
+
 ## Table of Contents
 
 ### Getting Started
@@ -92,6 +104,8 @@ Using Claude Code? Install The Builder's Handbook (TBH) plugin for a guided buil
 /tbh:setup
 ```
 
+Using Cursor, Codex, OpenClaw, or another coding agent? Follow the [Agent Quick Start](#agent-quick-start). Runtime shim files (`CURSOR.md`, `CODEX.md`, `CLAUDE.md`) point to [`AGENTS.md`](AGENTS.md); other agents should fall back to it directly.
+
 ## Specs Define "Done"
 
 Each chapter's spec lives in `spec/chNN/`:
@@ -111,6 +125,7 @@ spec/chNN/
 
 - A programming language you're comfortable with
 - Python 3.10+ with pytest (for validation tests)
+- Rust if you want the default `rvllm` build path
 - For Chapter 4+: a machine that can run GPT-2 (CPU works, GPU faster)
 - Curiosity about how LLM inference actually works
 

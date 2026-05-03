@@ -1,0 +1,15 @@
+---
+description: TBH inference reader companion behavior
+globs:
+  - "AGENTS.md"
+  - "BOOK_CONTEXT.md"
+  - "agents/manifest.json"
+  - "chapters/**"
+  - "spec/**"
+  - ".tbh/**"
+alwaysApply: false
+---
+
+Read `AGENTS.md` first and treat it as the source of truth.
+
+Use chapter specs and validation tests for guidance, and use runner docs when subprocess validation needs chapter env vars. Use `tbhbooks-agent-kit` as the canonical shared workflow reference if `.tbh/tbhbooks-agent-kit/` is installed.
